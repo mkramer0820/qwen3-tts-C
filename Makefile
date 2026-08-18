@@ -83,6 +83,7 @@ help:
 	@echo "Build:"
 	@echo "  make blas      - Build with BLAS acceleration (Accelerate/OpenBLAS)"
 	@echo "  make debug     - Debug build with AddressSanitizer"
+	@echo "  make rocm      - Build AMD ROCm/HIP inference backend"
 	@echo "  make clean     - Remove build artifacts"
 	@echo "  make info      - Show build configuration"
 	@echo ""
@@ -119,10 +120,13 @@ blas: $(TARGET)
 
 # ── Experimental GPU backends (opt-in; `make blas` is NEVER affected) ──────────
 # These add the backend seam (qwen_tts_backend) + one GPU TU and rebuild a fresh
-# qwen_tts with -DQWEN_HAVE_{METAL,CUDA}. Clean rebuild so GPU/CPU .o never mix.
+# qwen_tts with -DQWEN_HAVE_{METAL,CUDA,ROCM}. Clean rebuild so GPU/CPU .o never mix.
 # See plan_v4 §E4 / docs/gpu-accel-analysis.md. Metal is dev-testable on M1;
 # CUDA is cuBLAS-first (no nvcc for v1) and RTF-measured on the DGX/5090.
 GPU_OBJS = qwen_tts_backend.o qwen_tts_cuda.o
+ROCM_PATH ?= /opt/rocm
+HIPCC ?= $(ROCM_PATH)/bin/hipcc
+ROCM_ARCH ?= gfx1201
 
 # CUDA toolkit location — AUTO-DETECTED, because distros disagree: the NVIDIA
 # .run/.deb installers use /usr/local/cuda, Arch Linux's `cuda` package uses
@@ -139,7 +143,21 @@ CUDA_LIBDIR ?= $(shell \
 	if [ -d "$(CUDA_HOME)/lib64" ]; then echo "$(CUDA_HOME)/lib64"; \
 	else echo "$(CUDA_HOME)/lib"; fi)
 
-.PHONY: metal cuda metal_build cuda_build
+.PHONY: metal cuda rocm metal_build cuda_build rocm_build
+
+rocm:
+	@if [ ! -x "$(HIPCC)" ]; then \
+		echo "ERROR: hipcc not found at $(HIPCC). Set ROCM_PATH or HIPCC."; exit 1; \
+	fi
+	$(MAKE) clean
+	$(MAKE) rocm_build
+rocm_build: EXTRA_CFLAGS += -DQWEN_HAVE_ROCM -I$(ROCM_PATH)/include
+rocm_build: $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o
+	$(HIPCC) $(CFLAGS) --offload-arch=$(ROCM_ARCH) -o $(TARGET) $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(LDLIBS) -lhipblas
+	@echo "Built ./$(TARGET) with ROCm backend. Try: ./$(TARGET) --gpu-selftest --backend rocm"
+
+qwen_tts_rocm.o: qwen_tts_rocm.cpp qwen_tts_rocm.h
+	$(HIPCC) -O3 --offload-arch=$(ROCM_ARCH) -I. -c -o $@ $<
 
 # Metal (macOS): clang compiles the one ObjC TU; gcc the rest; +Metal/Foundation.
 metal:
@@ -247,8 +265,8 @@ qwen_tts_speech_encoder.o: qwen_tts_speech_encoder.c
 # Clean (also the opt-in GPU objects, which are NOT in $(OBJS) — else a stale
 # stub .o from a `make metal` build would silently be reused by `make cuda`).
 clean:
-	rm -f $(OBJS) $(OBJS:.o=.d) $(TARGET) qwen_tts_backend.o qwen_tts_cuda.o qwen_tts_metal.o qwen_tts_cuda_kernels.o
-	rm -f qwen_tts_backend.d qwen_tts_cuda.d qwen_tts_metal.d vendor/lz4.d
+	rm -f $(OBJS) $(OBJS:.o=.d) $(TARGET) qwen_tts_backend.o qwen_tts_cuda.o qwen_tts_metal.o qwen_tts_rocm.o qwen_tts_cuda_kernels.o
+	rm -f qwen_tts_backend.d qwen_tts_cuda.d qwen_tts_metal.d qwen_tts_rocm.d vendor/lz4.d
 	rm -f test_decoder_standalone.o test_decoder_standalone.d qwen_tts_decoder_tool
 
 # Debug build

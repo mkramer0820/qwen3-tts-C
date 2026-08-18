@@ -6,8 +6,12 @@ micro-file that the C engine loads with `--expr`. It makes **any voice** — a b
 or a cloned `.qvoice` — speak a target language more naturally *and* emote, **without** shipping
 a second multi-GB model.
 
-You need: one CUDA GPU (≈12 GB is plenty), Python, and an emotional-speech dataset in your
+You need: one CUDA or ROCm GPU (≈12 GB is plenty), Python, and an emotional-speech dataset in your
 target language. One run is ~10–20 min on a modern GPU.
+
+AMD users should install matching ROCm builds of PyTorch and torchaudio, then run
+`python check_rocm.py` before preparing codes or training. See
+[`../../docs/amd-rocm.md`](../../docs/amd-rocm.md).
 
 > Output sizes: a full fine-tune checkpoint is ~3.8 GB; this recipe ships a **16–63 MB** LoRA
 > `.expr` instead. See [`../../docs/expressivity-lora.md`](../../docs/expressivity-lora.md) for the

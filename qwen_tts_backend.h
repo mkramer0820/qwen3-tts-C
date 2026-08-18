@@ -3,8 +3,8 @@
  *
  * A tiny vtable one level ABOVE the kernels. The default is the CPU path
  * (qwen_matvec_* / qwen_matmat_* in qwen_tts_kernels.c) — this header only
- * matters when an experimental GPU backend (Metal / CUDA) is compiled in via
- * `make metal` / `make cuda`. In a plain `make blas` build no GPU TU is linked
+ * matters when an experimental GPU backend (Metal / CUDA / ROCm) is compiled in.
+ * In a plain `make blas` build no GPU TU is linked
  * and qwen_backend_init(GPU) cleanly reports "unavailable" and falls back.
  *
  * v1 exposes only the two primitives the offload path needs first:
@@ -29,6 +29,7 @@ typedef enum {
     QWEN_BACKEND_CPU   = 0,
     QWEN_BACKEND_METAL = 1,
     QWEN_BACKEND_CUDA  = 2,
+    QWEN_BACKEND_ROCM  = 3,
 } qwen_backend_kind_t;
 
 typedef struct qwen_backend {
@@ -53,7 +54,7 @@ typedef struct qwen_backend {
  * callers never have to special-case availability. Never returns NULL. */
 qwen_backend_t *qwen_backend_init(qwen_backend_kind_t want);
 
-/* Parse "cpu"/"metal"/"cuda" (case-insensitive) → kind; defaults to CPU. */
+/* Parse "cpu"/"metal"/"cuda"/"rocm"/"hip" (case-insensitive); defaults to CPU. */
 qwen_backend_kind_t qwen_backend_kind_from_str(const char *s);
 
 void qwen_backend_free(qwen_backend_t *b);

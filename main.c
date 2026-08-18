@@ -9,8 +9,8 @@
 #include "qwen_tts_batch.h"
 #include "qwen_tts_kernels.h"
 #include "qwen_tts_server.h"
-#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA)
-#include "qwen_tts_backend.h"   /* experimental GPU backends (make metal / make cuda) */
+#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA) || defined(QWEN_HAVE_ROCM)
+#include "qwen_tts_backend.h"   /* experimental GPU backends (Metal/CUDA/ROCm) */
 #endif
 #if defined(QWEN_HAVE_METAL)
 #include "qwen_tts_metal.h"     /* fused Talker step + selftest */
@@ -940,7 +940,7 @@ int main(int argc, char **argv) {
     int run_gpu_selftest = 0; /* --gpu-selftest: GPU-vs-CPU matvec/matmat correctness + timing, exit (GPU builds) */
     int run_gpu_selftest_talker = 0; /* --gpu-selftest-talker: fused resident Talker step vs CPU (needs model) */
     int run_gpu_batch_bench = 0; int gpu_batch_B = 4; /* --gpu-batch-bench N: batched Talker correctness + throughput */
-    const char *gpu_backend_str = NULL; /* --backend cpu|metal|cuda (v1: selects the --gpu-selftest target) */
+    const char *gpu_backend_str = NULL; /* --backend cpu|metal|cuda|rocm */
     float cp_roughness = 0.0f;        /* --roughness: q2-down blend on the CP (texture knob) */
     const char *emotion_spec = NULL;  /* --emotion: mood name or preset(s), e.g. "joy", "happy:0.5,proud:0.5" */
     const char *speaker_name = NULL;  /* -s preset name kept verbatim (id discards it) for the emotion router */
@@ -1240,20 +1240,22 @@ int main(int argc, char **argv) {
     /* --gpu-selftest: compare the experimental GPU backend's matvec/matmat against
      * the CPU reference (correctness + rough timing). GPU builds only. */
     if (run_gpu_selftest) {
-#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA)
+#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA) || defined(QWEN_HAVE_ROCM)
         qwen_init_threads();
         const char *want = gpu_backend_str;
         if (!want) {
 #if defined(QWEN_HAVE_METAL)
             want = "metal";
-#else
+#elif defined(QWEN_HAVE_CUDA)
             want = "cuda";
+#else
+            want = "rocm";
 #endif
         }
         return qwen_gpu_selftest(qwen_backend_kind_from_str(want), stdout);
 #else
         (void)gpu_backend_str;
-        fprintf(stderr, "--gpu-selftest requires a GPU build: `make metal` or `make cuda`\n");
+        fprintf(stderr, "--gpu-selftest requires a GPU build: `make metal`, `make cuda`, or `make rocm`\n");
         return 1;
 #endif
     }
@@ -1534,7 +1536,7 @@ int main(int argc, char **argv) {
     }
 #endif
 
-#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA)
+#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA) || defined(QWEN_HAVE_ROCM)
     /* Optional GPU offload (opt-in): route the bf16 matvec hot path through the
      * selected backend. CPU stays the default everywhere else; passing no
      * --backend (or --backend cpu) leaves the engine 100% on the CPU path. */
