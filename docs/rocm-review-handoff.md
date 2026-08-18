@@ -74,16 +74,18 @@ assets and cloned-voice directions. `README.md` was the only textual conflict.
 3. **BF16 and numerical validation:** fixed with a shared execution probe plus
    finite loss and gradient checks.
 4. **Host package detection:** fixed; package versions are checked, not just files.
-5. **PowerShell `$linuxRepo`:** no change. A variable argument is already passed as
-   one argument when the translated OneDrive path contains spaces.
+5. **PowerShell `$linuxRepo`:** defensively quoted. PowerShell already passed the
+   variable as one argument, but the explicit quoting protects future refactors.
 6. **Package integrity:** fixed for the two directly downloaded `.deb` artifacts.
 7. **Python dependency drift:** fixed for the model-facing packages whose private
    APIs and label semantics the trainer depends on.
 
 ## Remaining review risks
 
-- Confirm the pinned package set against a real short training run. Import and API
-  smoke tests cannot prove the external Talker performs the expected label shift.
+- Confirm the pinned package set against a real short training run. Exact-wheel
+  inspection confirms qwen-tts 0.1.1 has separate `text_embedding` and
+  `text_projection` modules, while Transformers 4.57.3 `ForCausalLMLoss` shifts
+  unshifted labels internally. A real run must still confirm output quality.
 - Confirm the R9700 reports `gfx1201`, BF16 works, and device-name selection wins
   over any integrated Radeon adapter.
 - Measure the FP32 weight cache's actual VRAM usage for 0.6B and 1.7B models.

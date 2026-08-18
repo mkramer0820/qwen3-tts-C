@@ -97,8 +97,8 @@ def train():
                 emb = te + ce
                 for i in range(1, 16):
                     emb = emb + tk.code_predictor.get_input_embeddings()[i - 1](b["codec_ids"][:, :, i]) * b["codec_mask"].unsqueeze(-1)
-                # Pass unshifted labels: modern Transformers causal-LM losses perform
-                # the one-token shift internally. For the sub-talker, hidden token t
+                # qwen-tts 0.1.1 uses Transformers 4.57.3 ForCausalLMLoss, which
+                # shifts labels internally. For the sub-talker, hidden token t
                 # predicts codec token t+1, hence hidden[:-1] with mask[1:].
                 out = tk(inputs_embeds=emb, attention_mask=b["attention_mask"],
                          labels=b["codec_0_labels"], output_hidden_states=True)

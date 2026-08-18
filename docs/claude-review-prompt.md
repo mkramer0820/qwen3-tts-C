@@ -38,6 +38,9 @@ Required review areas
      0.18.1 are mutually compatible with the exact APIs used by train_lora.py.
    - Independently validate main-talker label shifting and sub-talker hidden/codec
      alignment against the installed qwen-tts source.
+   - Inspect the exact qwen-tts 0.1.1 and Transformers 4.57.3 wheels, not only the
+     Qwen repository's current reference script. Reconcile any disagreement with
+     the actual `text_embedding`, `text_projection`, and `ForCausalLMLoss` source.
    - Check finite loss/gradient handling under gradient accumulation and multiple
      Accelerator processes, including whether all workers fail consistently.
    - Check save/resume and .expr export behavior after the dependency pins.

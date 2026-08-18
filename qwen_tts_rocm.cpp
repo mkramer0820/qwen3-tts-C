@@ -49,6 +49,8 @@ extern "C" void *qwen_rocm_init(void) {
 extern "C" void qwen_rocm_free(void *opaque) {
     qwen_rocm_ctx *ctx = (qwen_rocm_ctx *)opaque;
     if (!ctx) return;
+    // The owner must stop all operations before teardown; locking cannot make
+    // destruction safe while another thread may still be waiting on this mutex.
     for (int i = 0; i < ctx->count; ++i) hipFree(ctx->weights[i].device);
     free(ctx->weights);
     if (ctx->dx) hipFree(ctx->dx);
