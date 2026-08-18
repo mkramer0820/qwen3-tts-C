@@ -5,6 +5,15 @@ Date: 2026-08-18
 Purpose: give the next reviewer (including Claude) enough context to confirm,
 challenge, or revise the ROCm changes without relying on chat history.
 
+## Validation status: NOT HARDWARE TESTED
+
+Do not approve these changes because syntax/configuration checks pass. No ROCm
+Docker image was built, no HIP source was compiled, and no command was run on the
+AMD Radeon AI PRO R9700. Training, voice cloning, voice naming/metadata, expression
+adapters, HTTP emotion behavior, numerical parity, fallback behavior, and audible
+output all remain unverified on hardware. The acceptance checklist at the end is
+required before describing this branch as working or production-ready.
+
 ## Problems addressed
 
 1. A requested GPU backend could fall back to CPU, after which `--gpu-selftest`
@@ -134,6 +143,9 @@ Claude should independently inspect and either confirm or dispute each item:
    CPU/CUDA/Metal builds are unaffected, and no AMD default leaks into other users.
 10. Usability from a clean Windows 11 host that initially lists only
     `docker-desktop`: every failure should state the next corrective action.
+11. Populate the README and `docs/amd-rocm.md` R9700 performance tables with raw
+    command evidence. Leave values `Undetermined` rather than extrapolating from
+    CUDA, Metal, a different Radeon GPU, or theoretical bandwidth.
 
 ## Hardware acceptance checklist
 

@@ -1,6 +1,32 @@
 # Performance
 
-All benchmarks on Apple M1 8-core, 16 GB RAM, 4 threads.
+> **Provenance:** the measured values in this document predate the AMD ROCm fork.
+> They are retained as upstream CPU/Metal/CUDA history, not as evidence of AMD
+> Radeon AI PRO R9700 performance.
+
+## AMD Radeon AI PRO R9700
+
+The ROCm backend has not been measured on the target GPU. Results remain
+`Undetermined` until the hardware acceptance workflow records raw commands and
+outputs.
+
+| Workload | Configuration | RTF / throughput | TTFA | Peak VRAM | Status |
+|---|---|---:|---:|---:|---|
+| 0.6B preset inference | ROCm BF16, single stream | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B preset inference | ROCm BF16, single stream | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B cloned voice | ROCm BF16 + `--icl-only` | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B expression output | ROCm BF16 + `.expr` + emotion | Undetermined | Undetermined | Undetermined | Not run |
+| HTTP server | ROCm BF16, 1/4/8 clients | Undetermined | Undetermined | Undetermined | Not run |
+| LoRA training | PyTorch ROCm BF16 | Undetermined steps/s | N/A | Undetermined | Not run |
+
+See [AMD ROCm](amd-rocm.md) for implementation limits and [the independent
+review checklist](rocm-change-review-2026-08-18.md) for required acceptance tests.
+
+## Inherited Upstream Performance
+
+The following benchmarks were collected on Apple M1 8-core, 16 GB RAM, 4 threads,
+or on the separately identified CPU/NVIDIA/Metal systems. They were not rerun for
+this fork.
 
 ## Summary
 

@@ -1,6 +1,11 @@
 # AMD ROCm support
 
-This branch supports AMD GPUs in two independent places:
+> **Status: implementation complete, hardware validation pending.** Nothing in
+> this document is evidence of a successful R9700 build or run. The ROCm C backend,
+> PyTorch training, cloning, naming, and expression workflows still require the
+> hardware acceptance checklist in `rocm-change-review-2026-08-18.md`.
+
+This branch implements AMD GPU paths in two independent places:
 
 1. **LoRA training** uses an AMD ROCm build of PyTorch. PyTorch exposes HIP GPUs
    through its `cuda` compatibility API, so the existing model code does not need
@@ -86,9 +91,10 @@ This initial backend is not equivalent to the fused CUDA/Metal paths:
   weights can be rebuilt from the modified BF16 tensors.
 
 Voice creation, `--load-voice`, `--voice-name`, `--icl-only`, `--instruct`, and
-CLI `.expr`/`--emotion` routing are independent of the device backend and work
-with `--backend rocm`. `--voice-name` is stored metadata; voices are loaded by
-their `.qvoice` path, not selected by metadata name.
+CLI `.expr`/`--emotion` routing are backend-independent in the code and are
+intended to operate with `--backend rocm`; R9700 hardware validation is pending.
+`--voice-name` is stored metadata; voices are loaded by their `.qvoice` path, not
+selected by metadata name.
 
 For a cloned voice served over HTTP, per-request `emotion` installs the steering
 vector. Start the server with the appropriate language adapter when CLI-equivalent
@@ -99,6 +105,24 @@ COMBINE behavior is desired:
   --load-voice voices/mario.qvoice --icl-only \
   --expr presets/expr/italian_csp_topk6.expr --serve 8080
 ```
+
+## R9700 performance results
+
+No performance value has been measured yet. `Undetermined` is used instead of an
+estimate so later results can be traced to an actual command and output artifact.
+
+| Test | RTF / throughput | TTFA | Peak VRAM | Result |
+|---|---:|---:|---:|---|
+| 0.6B preset, BF16, single stream | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B preset, BF16, single stream | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B cloned voice with `--icl-only` | Undetermined | Undetermined | Undetermined | Not run |
+| 1.7B `.expr` plus `--emotion` | Undetermined | Undetermined | Undetermined | Not run |
+| Server at 1/4/8 concurrent requests | Undetermined | Undetermined | Undetermined | Not run |
+| LoRA BF16 training | Undetermined steps/s | N/A | Undetermined | Not run |
+
+Do not compare those empty cells with the inherited Metal/CUDA tables until the
+R9700 run records driver, ROCm, PyTorch, model, precision, seed, wall time, audio
+duration, fallback warnings, and peak VRAM.
 
 Future performance work should keep activations and KV caches resident and port
 the Talker, Code Predictor, and speech decoder kernels to HIP.
