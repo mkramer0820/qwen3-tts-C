@@ -1,0 +1,24 @@
+ARG ROCM_PYTORCH_IMAGE=rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.9.1
+FROM ${ROCM_PYTORCH_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROCM_PATH=/opt/rocm \
+    PATH=/opt/rocm/bin:${PATH} \
+    LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:${LD_LIBRARY_PATH}
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential ca-certificates git libgomp1 libopenblas-dev libsndfile1 lz4 pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY training/expressivity-lora/requirements.txt /tmp/qwen-rocm-requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/qwen-rocm-requirements.txt
+RUN python3 -c "import qwen_tts, torch; assert torch.version.hip, 'pip replaced the ROCm torch wheel'; assert torch.__version__.startswith('2.9.1'), torch.__version__; print('ROCm torch preserved:', torch.__version__, torch.version.hip)"
+
+COPY training/expressivity-lora/docker/rocm-entrypoint.sh /usr/local/bin/qwen-rocm
+RUN sed -i 's/\r$//' /usr/local/bin/qwen-rocm && chmod 0755 /usr/local/bin/qwen-rocm
+
+WORKDIR /workspace/qwen3-tts-C
+ENTRYPOINT ["qwen-rocm"]
+CMD ["help"]

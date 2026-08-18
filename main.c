@@ -692,6 +692,10 @@ static int run_compose(qwen_tts_ctx_t *ctx, const char *spec, const char *langua
  * voice (the voice's ICL/x-vector loads separately; this only touches the backbone weights).
  * Returns 0 on success (>=1 tensor applied), -1 on error. */
 static int apply_expr_file(qwen_tts_ctx_t *ctx, const char *path, float expr_weight, int silent) {
+    if (ctx->use_int4) {
+        fprintf(stderr, "Error: .expr adapters are incompatible with --int4/--quant-mixed because Q4 weights cannot be rebuilt yet\n");
+        return -1;
+    }
     FILE *f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "Error: cannot open --expr file %s\n", path); return -1; }
     char magic[4];
@@ -896,9 +900,9 @@ static int apply_expr_file(qwen_tts_ctx_t *ctx, const char *path, float expr_wei
         if (!silent) fprintf(stderr, "  Re-quantizing INT8 from .expr-overridden weights...\n");
         qwen_talker_quantize_int8(ctx);
         qwen_cp_quantize_int8(ctx);
-    } else if (loaded > 0 && ctx->use_int4 && !silent) {
-        fprintf(stderr, "  Warning: --expr in --int4 mode does not yet re-quantize; delta ignored.\n");
     }
+
+    if (loaded > 0) ctx->expr_applied = 1;
 
     if (!silent)
         fprintf(stderr, "Expressivity: applied %d/%u tensors from %s (lang=%s)\n",
@@ -1212,6 +1216,16 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (gpu_backend_str && strcasecmp(gpu_backend_str, "cpu") != 0 &&
+        strcasecmp(gpu_backend_str, "metal") != 0 &&
+        strcasecmp(gpu_backend_str, "cuda") != 0 &&
+        strcasecmp(gpu_backend_str, "rocm") != 0 &&
+        strcasecmp(gpu_backend_str, "hip") != 0) {
+        fprintf(stderr, "Error: unknown backend '%s' (expected cpu, metal, cuda, or rocm)\n",
+                gpu_backend_str);
+        return 1;
+    }
+
     /* --caps: report the binary's ACTUAL compiled SIMD/threading capabilities and exit
      * (no model needed). Honest, testable source of truth — catches "we thought AVX
      * existed" regressions that docs/comments can hide. */
@@ -1296,6 +1310,20 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Error: --model-dir is required\n");
         return 1;
     }
+#if defined(QWEN_HAVE_METAL) || defined(QWEN_HAVE_CUDA) || defined(QWEN_HAVE_ROCM)
+    if (gpu_backend_str) {
+        qwen_backend_kind_t requested = qwen_backend_kind_from_str(gpu_backend_str);
+        if (requested != QWEN_BACKEND_CPU && !qwen_backend_available(requested)) {
+            fprintf(stderr, "Error: requested GPU backend '%s' is unavailable\n", gpu_backend_str);
+            return 1;
+        }
+    }
+#else
+    if (gpu_backend_str && strcasecmp(gpu_backend_str, "cpu") != 0) {
+        fprintf(stderr, "Error: backend '%s' is not compiled into this binary\n", gpu_backend_str);
+        return 1;
+    }
+#endif
     /* --save-voice without --text = create voice only (no generation) */
     int create_voice_only = (save_voice && !text && serve_port <= 0);
     if (!text && !compose_spec && serve_port <= 0 && !create_voice_only && !run_batch_test && !run_batch_bench
@@ -1308,6 +1336,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Model dir: %s\n", model_dir);
         if (text) fprintf(stderr, "Text: \"%s\"\n", text);
         fprintf(stderr, "Output: %s\n", output);
+    }
+    if (gpu_backend_str &&
+        (strcasecmp(gpu_backend_str, "rocm") == 0 || strcasecmp(gpu_backend_str, "hip") == 0) &&
+        (use_int8 || use_int4)) {
+        fprintf(stderr, "Warning: ROCm only offloads BF16 matrices; quantized Talker/Code Predictor "
+                        "kernels remain on CPU.\n");
     }
 
     /* Early validation: check ref-audio format BEFORE loading the model.
@@ -1544,6 +1578,12 @@ int main(int argc, char **argv) {
         qwen_backend_kind_t bk = qwen_backend_kind_from_str(gpu_backend_str);
         if (bk != QWEN_BACKEND_CPU) {
             qwen_backend_t *gpu_backend = qwen_backend_init(bk);
+            if (!gpu_backend || gpu_backend->kind != bk) {
+                fprintf(stderr, "Error: requested GPU backend '%s' is unavailable\n", gpu_backend_str);
+                qwen_backend_free(gpu_backend);
+                qwen_tts_unload(ctx);
+                return 1;
+            }
             /* When a fused resident step is active it owns the GPU work; the per-op matvec hook
              * would only slow the OTHER components (e.g. CP) with sync round-trips → skip it. */
             int metal_fused = 0;

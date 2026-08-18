@@ -45,6 +45,8 @@ make blas
 
 > **Dependencies:** Only a C compiler and BLAS (Accelerate on macOS, OpenBLAS on Linux).
 > See [docs/building.md](docs/building.md) for Linux, Windows/WSL2, and other build targets.
+> AMD Radeon AI PRO R9700 users can use the guided [ROCm Docker on Windows/WSL2](docs/rocm-wsl-docker.md)
+> workflow; it is an additional Compose profile and does not replace CUDA or native builds.
 
 ## Features
 
@@ -61,7 +63,7 @@ make blas
 - **Emotion in one flag** (🧪 **beta**; paralinguistics `[laugh]`/`[sigh]` 🧪 **alpha**) — `--emotion <sad\|joy\|anger\|fear\|disgust\|surprise>` (1.7B) auto-applies the ear-validated recipe (per-language fine-tune `.expr` + steering vector + a default English instruct + temperature), on presets **and** cloned voices, in every Qwen language. **Plus 7 blended "dyads"** (`contempt`, `awe`, `nostalgia`, `disapproval`, `remorse`, `outrage`, `despair`) and **inline `[emotion]` switching** — many emotions from one prompt in a single generation. A vivid English `--instruct` and `-T` override. Pitch-preserving `--rate`/`--volume` and a `--roughness` grit knob are still available. See [docs/emotion-THE-recipe.md](docs/emotion-THE-recipe.md).
 - **Inline markup for audiobooks** — write one text with ElevenLabs/Bark-style tags and get a multi-emotion take in one pass: `--text "I won! [joy] ...amazing! [pause:500ms] [sad] But it's over. [sigh]"`. Mid-text emotion switches, `[pause:400ms]`/`[break:1s]` pauses, and `[sigh]`/`[huff]` paralinguistic fillers — auto-detected in `--text` (no flag) or explicit via `--compose`. Spans are model-generated and concatenated seamlessly. See [docs/markup.md](docs/markup.md).
 - **VoiceDesign** — Create new voices from text descriptions.
-- **HTTP server** — `/v1/tts`, `/v1/tts/stream`, OpenAI-compatible `/v1/audio/speech`; JSON body takes `emotion`/`instruct`/`volume`/`rate` (same recipe as the CLI). **Inline `[mood]` markup works over the API too** — one request can switch emotion sentence-by-sentence (`"text":"[joy] Great news! [sad] But I must go."`), auto-detected and streamed span-by-span. See [docs/server.md](docs/server.md).
+- **HTTP server** — `/v1/tts`, `/v1/tts/stream`, OpenAI-compatible `/v1/audio/speech`; JSON body takes `emotion`/`instruct`/`volume`/`rate`. **Inline `[mood]` markup works over the API too** — one request can switch emotion sentence-by-sentence (`"text":"[joy] Great news! [sad] But I must go."`), auto-detected and streamed span-by-span. Cloned voices need a startup `--expr` for CLI-equivalent COMBINE emotion. See [docs/server.md](docs/server.md).
 - **Streaming** — Real-time audio via `--stream` (WAV) or `--stdout` (raw PCM).
 - **INT8 / INT4 quantization** — `--int8` / `--int4` quantize Talker + Code Predictor (native SDOT on ARM, AVX-512/VNNI on x86), near-bf16 quality, and work with presets **and** custom `.qvoice` voices. On cache-rich Apple Silicon **both go sub-realtime** (0.6B best **0.52 int4 / 0.69 int8**; 1.7B best **~1.53** quant-mixed); on memory-starved x86, int8+VNNI wins the wall clock. See [Performance](#performance).
 - **Configurable sampling** — Temperature, top-k, top-p, and repetition penalty.
@@ -341,7 +343,7 @@ Italian-only emotion needs just `italian_csp_topk6.expr` (203 MB).
 curl -s http://localhost:8080/v1/tts \
   -d '{"text":"Hello, how are you?"}' -o output.wav
 
-# With emotion (same recipe as the CLI --emotion; joy/sad/angry/calm/…)
+# With emotion (qlsteer; cloned voices need startup --expr for CLI COMBINE)
 curl -s http://localhost:8080/v1/tts \
   -d '{"text":"What a wonderful day!","speaker":"ryan","language":"English","emotion":"joy"}' -o joy.wav
 
@@ -488,7 +490,8 @@ Optional `--backend metal|cuda` runs the **whole fused pipeline resident on the 
 activations on device, one command buffer / step). The CPU path stays the default — GPU is purely additive.
 Full numbers: [Metal / Apple Silicon](docs/hardware-testing.md) · [CUDA / NVIDIA](docs/cuda-performance.md).
 
-AMD GPUs can use `make rocm ROCM_ARCH=gfx1201` and `--backend rocm`. The initial
+AMD GPUs can use `make rocm` (auto-detected native target) and `--backend rocm`.
+Use `ROCM_ARCH="gfx1100 gfx1101 gfx1201"` for an RDNA3/RDNA4 multi-target binary. The initial
 HIP/hipBLAS backend keeps converted weights resident but synchronizes activations
 per matrix operation; other kernels retain the CPU fallback. See [AMD ROCm](docs/amd-rocm.md).
 

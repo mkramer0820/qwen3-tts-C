@@ -1,0 +1,42 @@
+name: qwen3-tts
+
+services:
+  rocm-wsl:
+    profiles: [rocm]
+    image: qwen3-tts:rocm7.2.1-pytorch2.9.1
+    build:
+      context: .
+      dockerfile: training/expressivity-lora/docker/Dockerfile.rocm
+    working_dir: /workspace/qwen3-tts-C
+    devices:
+      - /dev/dxg:/dev/dxg
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    ipc: host
+    shm_size: 8gb
+    stdin_open: true
+    tty: true
+    environment:
+      HSA_ENABLE_DXG_DETECTION: "1"
+    volumes:
+      - .:/workspace/qwen3-tts-C
+      - /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so:ro
+      - /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so:ro
+      - /opt/rocm/share/rocdxg/dids.conf:/usr/share/rocdxg/dids.conf:ro
+
+  cuda:
+    profiles: [cuda]
+    image: qwen-ft:latest
+    build:
+      context: training/expressivity-lora/docker
+      dockerfile: Dockerfile
+    working_dir: /workspace/qwen3-tts-C
+    gpus: all
+    ipc: host
+    shm_size: 8gb
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/workspace/qwen3-tts-C

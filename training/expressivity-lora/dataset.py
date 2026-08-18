@@ -37,6 +37,11 @@ class TTSDataset(Dataset):
         instruct = item.get("instruct", "") or ""
         instruct_ids = self._tok(self._build_instruct(instruct)) if instruct.strip() else torch.zeros((1, 0), dtype=torch.long)
         audio_codes = torch.tensor(item["audio_codes"], dtype=torch.long)
+        if audio_codes.ndim != 2 or audio_codes.shape[1] != 16:
+            raise ValueError(
+                f"audio_codes for row {idx} must have shape [frames, 16], got {tuple(audio_codes.shape)}; "
+                "regenerate the manifest with this repository's prepare_data.py"
+            )
         return {"instruct_ids": instruct_ids, "text_ids": text_ids, "audio_codes": audio_codes}
 
     def collate_fn(self, batch):

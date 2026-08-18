@@ -54,9 +54,7 @@ curl -s http://localhost:8080/v1/tts \
   -d '{"text":"I cannot believe it!","instruct":"Speak angrily"}' \
   -o angry.wav
 
-# With emotion — same ear-validated recipe as the CLI --emotion
-# (joy/happy/excited/proud/news/dramatic/calm/sad/gloomy/annoyed/stern/angry).
-# Sets the Code-Predictor steering vector for (emotion, language) + volume/tempo.
+# With emotion — installs the 1.7B qlsteer vector used by CLI --emotion.
 curl -s http://localhost:8080/v1/tts \
   -d '{"text":"What a wonderful day!","speaker":"ryan","language":"English","emotion":"joy"}' \
   -o joy.wav
@@ -145,7 +143,7 @@ temperature=0.5, top_k=50, top_p=1.0, rep_penalty=1.05, seed=random.
 | Field | Meaning |
 |---|---|
 | `instruct` | Free-form style prompt (**1.7B only**), e.g. `"Speak angrily"`. |
-| `emotion` | Named mood — same recipe as the CLI `--emotion`: `joy`, `happy`, `excited`, `proud`, `news`, `dramatic`, `calm`, `sad`, `gloomy`, `annoyed`, `stern`, `angry`. Sets the Code-Predictor steering vector for the `(emotion, language)` pair (applied during generation, so it works on **both** `/v1/tts` and `/v1/tts/stream`) and applies the recipe's volume/tempo. Best on 1.7B. |
+| `emotion` | Named mood routed to the 1.7B qlsteer palette (applied during generation, so it works on **both** `/v1/tts` and `/v1/tts/stream`). For a cloned voice, start the server with the appropriate `--expr <language.expr>` to match the CLI COMBINE recipe; without it, HTTP emotion is STEER-only and the server logs a note. |
 | `volume` | Linear output gain (`1.0` = unchanged). Overrides the emotion recipe's volume; applied on both full and streaming paths. |
 | `rate` | Pitch-preserving tempo (`>1` faster). Overrides the emotion recipe's rate. Applied on `/v1/tts`; **not** on `/v1/tts/stream` (needs the full buffer). |
 | inline `[mood]` markup (in `text`) | **Per-sentence dynamic emotion.** If the `text` carries inline tags — `[joy]`/`[sad]`/`[excited]`/… to switch mood mid-text, `[neutral]` to reset, `[pause:400ms]`/`[break:1s]` for gaps, `[laugh]`/`[sigh]` paralinguistics — the server splits the text into spans, synthesizes each with its own emotion, and concatenates them. Auto-detected on **both** endpoints; `/v1/tts/stream` flushes span-by-span (low time-to-first-audio). This is the same composer as the CLI's `--compose` / auto-detected `--text`. The top-level `emotion` field sets a single mood for the whole request; inline tags let one request span several. Same tag set as [docs/markup.md](markup.md). |

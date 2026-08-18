@@ -31,6 +31,11 @@ def main():
     arch = getattr(props, "gcnArchName", "unknown")
     print(f"arch={arch}")
 
+    bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+    if not bf16_supported:
+        print("FAIL: this GPU/runtime does not report BF16 support", file=sys.stderr)
+        return 3
+
     a = torch.randn(args.size, args.size, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     b = torch.randn(args.size, args.size, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     loss = (a @ b).float().square().mean()
@@ -38,7 +43,7 @@ def main():
     torch.cuda.synchronize()
     if not torch.isfinite(loss) or not torch.isfinite(a.grad).all() or not torch.isfinite(b.grad).all():
         print("FAIL: non-finite BF16 result or gradient", file=sys.stderr)
-        return 3
+        return 4
     print(f"PASS: BF16 forward/backward (loss={loss.item():.6f})")
     return 0
 

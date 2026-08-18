@@ -407,6 +407,10 @@ static char *parse_tts_request(qwen_tts_ctx_t *ctx, const char *body,
     float req_rate = (float)json_extract_number(body, "rate", 1.0);
     char *emotion = json_extract_string(body, "emotion");
     if (emotion && emotion[0]) {
+        if (ctx->voice_clone && !ctx->expr_applied) {
+            fprintf(stderr, "[HTTP] Note: cloned-voice emotion is STEER-only; start the server with "
+                            "--expr <language.expr> for the CLI COMBINE recipe.\n");
+        }
         qwen_tts_apply_emotion(ctx, emotion, language,
                                0.0f, 0, req_vol, vol_present, req_rate, rate_present,
                                &eff_vol, &eff_rate, 0);

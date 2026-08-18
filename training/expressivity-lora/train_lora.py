@@ -43,6 +43,10 @@ def train():
             raise RuntimeError("--require-rocm was set, but torch.version.hip is None (wrong PyTorch wheel)")
         if not torch.cuda.is_available():
             raise RuntimeError("--require-rocm was set, but no ROCm GPU is visible")
+    if args.mixed_precision == "bf16" and torch.cuda.is_available():
+        bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+        if not bf16_supported:
+            raise RuntimeError("BF16 training was requested, but this GPU/runtime does not support BF16; use --mixed_precision fp16")
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "no": torch.float32}[args.mixed_precision]
     acc = Accelerator(gradient_accumulation_steps=4, mixed_precision=args.mixed_precision)
     if acc.is_main_process:
@@ -51,6 +55,8 @@ def train():
         print(f"[device] {backend}; {device_name}; precision={args.mixed_precision}")
     qwen3tts = Qwen3TTSModel.from_pretrained(args.init_model_path, torch_dtype=dtype,
                                              attn_implementation="eager")
+    if not hasattr(qwen3tts.model.talker, "text_projection"):
+        raise RuntimeError("installed qwen-tts is incompatible: Talker has no text_projection")
     config = AutoConfig.from_pretrained(args.init_model_path)
 
     lcfg = LoraConfig(
@@ -76,7 +82,7 @@ def train():
                 tmask = b["text_embedding_mask"]; cmask = b["codec_embedding_mask"]
                 spk_pos = b["spk_pos"]
                 tk = model.talker
-                te = tk.model.text_embedding(input_ids[:, :, 0]) * tmask
+                te = tk.text_projection(tk.model.text_embedding(input_ids[:, :, 0])) * tmask
                 ce = tk.model.codec_embedding(input_ids[:, :, 1]) * cmask
                 spk_ids = torch.tensor([random.choice(PRESET_IDS) for _ in range(B)], device=model.device)
                 spk_emb = tk.model.codec_embedding(spk_ids).to(ce.dtype)
@@ -85,9 +91,12 @@ def train():
                 emb = te + ce
                 for i in range(1, 16):
                     emb = emb + tk.code_predictor.get_input_embeddings()[i - 1](b["codec_ids"][:, :, i]) * b["codec_mask"].unsqueeze(-1)
-                out = tk(inputs_embeds=emb[:, :-1, :], attention_mask=b["attention_mask"][:, :-1],
-                         labels=b["codec_0_labels"][:, 1:], output_hidden_states=True)
-                hs = out.hidden_states[0][-1][b["codec_mask"][:, :-1]]
+                # Pass unshifted labels: modern Transformers causal-LM losses perform
+                # the one-token shift internally. For the sub-talker, hidden token t
+                # predicts codec token t+1, hence hidden[:-1] with mask[1:].
+                out = tk(inputs_embeds=emb, attention_mask=b["attention_mask"],
+                         labels=b["codec_0_labels"], output_hidden_states=True)
+                hs = out.hidden_states[0][-1][:, :-1, :][b["codec_mask"][:, 1:]]
                 sub_ids = b["codec_ids"][b["codec_mask"]]
                 _, sub_loss = tk.forward_sub_talker_finetune(sub_ids, hs)
                 loss = out.loss + 0.3 * sub_loss
