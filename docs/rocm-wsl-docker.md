@@ -1,5 +1,9 @@
 # ROCm Docker on Windows/WSL2
 
+> **Status: configuration only; not yet run on the target machine.** Compose and
+> PowerShell syntax validate, but the image has not been built and GPU access has
+> not been tested because Ubuntu WSL and the R9700 runtime are not installed yet.
+
 This is the guided Windows path for an **AMD Radeon AI PRO R9700**. The card is
 an RDNA4 `gfx1201` device and is supported by AMD's ROCm 7.2.1 ROCDXG WSL stack.
 
