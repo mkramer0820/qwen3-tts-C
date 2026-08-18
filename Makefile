@@ -126,7 +126,10 @@ blas: $(TARGET)
 GPU_OBJS = qwen_tts_backend.o qwen_tts_cuda.o
 ROCM_PATH ?= /opt/rocm
 HIPCC ?= $(ROCM_PATH)/bin/hipcc
-ROCM_ARCH ?= gfx1201
+# Build for the locally installed GPU by default. Pass a space-separated list
+# (for example ROCM_ARCH="gfx1100 gfx1101 gfx1201") to produce an RDNA3/RDNA4 fat binary.
+ROCM_ARCH ?= native
+ROCM_ARCH_FLAGS = $(foreach arch,$(ROCM_ARCH),--offload-arch=$(arch))
 
 # CUDA toolkit location — AUTO-DETECTED, because distros disagree: the NVIDIA
 # .run/.deb installers use /usr/local/cuda, Arch Linux's `cuda` package uses
@@ -153,11 +156,11 @@ rocm:
 	$(MAKE) rocm_build
 rocm_build: EXTRA_CFLAGS += -DQWEN_HAVE_ROCM -I$(ROCM_PATH)/include
 rocm_build: $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o
-	$(HIPCC) $(CFLAGS) --offload-arch=$(ROCM_ARCH) -o $(TARGET) $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(LDLIBS) -lhipblas
+	$(HIPCC) $(CFLAGS) $(ROCM_ARCH_FLAGS) -o $(TARGET) $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(LDLIBS) -lhipblas
 	@echo "Built ./$(TARGET) with ROCm backend. Try: ./$(TARGET) --gpu-selftest --backend rocm"
 
 qwen_tts_rocm.o: qwen_tts_rocm.cpp qwen_tts_rocm.h
-	$(HIPCC) -O3 --offload-arch=$(ROCM_ARCH) -I. -c -o $@ $<
+	$(HIPCC) -O3 $(ROCM_ARCH_FLAGS) -I. -c -o $@ $<
 
 # Metal (macOS): clang compiles the one ObjC TU; gcc the rest; +Metal/Foundation.
 metal:

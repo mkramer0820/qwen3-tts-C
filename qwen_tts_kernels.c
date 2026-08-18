@@ -840,8 +840,7 @@ static void bf16_mv_task(size_t tid, size_t nt, void *vc) {
  * predictable, not-taken branch when GPU is off. */
 void (*g_qwen_matvec_bf16_hook)(float *, const uint16_t *, const float *, int, int) = NULL;
 
-void qwen_matvec_bf16(float *y, const uint16_t *W, const float *x, int rows, int cols) {
-    if (g_qwen_matvec_bf16_hook) { g_qwen_matvec_bf16_hook(y, W, x, rows, cols); return; }
+void qwen_matvec_bf16_cpu(float *y, const uint16_t *W, const float *x, int rows, int cols) {
     int nt = g_n_threads;
     if (nt > 1 && rows >= 256) {
         bf16_mv_ctx c = { y, W, x, rows, cols };
@@ -849,6 +848,11 @@ void qwen_matvec_bf16(float *y, const uint16_t *W, const float *x, int rows, int
         return;
     }
     bf16_matvec_fused(y, x, W, cols, rows);
+}
+
+void qwen_matvec_bf16(float *y, const uint16_t *W, const float *x, int rows, int cols) {
+    if (g_qwen_matvec_bf16_hook) { g_qwen_matvec_bf16_hook(y, W, x, rows, cols); return; }
+    qwen_matvec_bf16_cpu(y, W, x, rows, cols);
 }
 
 /* ---- Batched matmat: Y[rows,B] = W[rows,cols] @ X[cols,B] (the batching /
@@ -1076,8 +1080,7 @@ static void bfmmla_task(size_t tid, size_t nt, void *vc) {
 }
 #endif /* __ARM_FEATURE_BF16_VECTOR_ARITHMETIC */
 
-void qwen_matmat_bf16(float *Y, const uint16_t *W, const float *X, int rows, int cols, int B) {
-    if (g_qwen_matmat_bf16_hook) { g_qwen_matmat_bf16_hook(Y, W, X, rows, cols, B); return; }
+void qwen_matmat_bf16_cpu(float *Y, const uint16_t *W, const float *X, int rows, int cols, int B) {
     if (B <= 0) return;
     if (B > 64) B = 64;  /* contract: B<=64 */
     int nt = g_n_threads;
@@ -1123,6 +1126,11 @@ void qwen_matmat_bf16(float *Y, const uint16_t *W, const float *X, int rows, int
         return;
     }
     bf16_matmat_slice(Y, W, X, 0, rows, cols, B);
+}
+
+void qwen_matmat_bf16(float *Y, const uint16_t *W, const float *X, int rows, int cols, int B) {
+    if (g_qwen_matmat_bf16_hook) { g_qwen_matmat_bf16_hook(Y, W, X, rows, cols, B); return; }
+    qwen_matmat_bf16_cpu(Y, W, X, rows, cols, B);
 }
 
 /* ---- INT8 batched matmat twin: Y[rows,B] = (W_int8[rows,cols]*scale[rows]) @ X[cols,B]

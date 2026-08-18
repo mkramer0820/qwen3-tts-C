@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-struct weight_cache_entry { const void *key; float *device; };
+struct weight_cache_entry { const void *key; size_t count; float *device; };
 struct qwen_rocm_ctx {
     hipblasHandle_t handle;
     weight_cache_entry *weights;
@@ -55,8 +55,14 @@ extern "C" void qwen_rocm_free(void *opaque) {
 }
 
 static float *resident_weight(qwen_rocm_ctx *ctx, const uint16_t *weight, size_t count) {
-    for (int i = 0; i < ctx->count; ++i)
-        if (ctx->weights[i].key == weight) return ctx->weights[i].device;
+    for (int i = 0; i < ctx->count; ++i) {
+        if (ctx->weights[i].key != weight) continue;
+        if (ctx->weights[i].count != count) {
+            fprintf(stderr, "ROCm: cached weight shape changed\n");
+            return nullptr;
+        }
+        return ctx->weights[i].device;
+    }
 
     float *host = (float *)malloc(count * sizeof(float));
     if (!host) return nullptr;
@@ -77,44 +83,52 @@ static float *resident_weight(qwen_rocm_ctx *ctx, const uint16_t *weight, size_t
         ctx->weights = (weight_cache_entry *)grown;
         ctx->capacity = next;
     }
-    ctx->weights[ctx->count++] = {weight, device};
+    ctx->weights[ctx->count++] = {weight, count, device};
     return device;
 }
 
 static float *grow_device(float **buffer, size_t *capacity, size_t bytes) {
     if (*capacity >= bytes) return *buffer;
+    float *grown = nullptr;
+    if (hipMalloc((void **)&grown, bytes) != hipSuccess) return nullptr;
     if (*buffer) hipFree(*buffer);
-    *buffer = nullptr; *capacity = 0;
-    if (hipMalloc((void **)buffer, bytes) != hipSuccess) return nullptr;
+    *buffer = grown;
     *capacity = bytes;
     return *buffer;
 }
 
-extern "C" void qwen_rocm_matmat_bf16(void *opaque, float *output,
-                                         const uint16_t *weight, const float *input,
-                                         int rows, int cols, int batch) {
+extern "C" int qwen_rocm_matmat_bf16(void *opaque, float *output,
+                                      const uint16_t *weight, const float *input,
+                                      int rows, int cols, int batch) {
     qwen_rocm_ctx *ctx = (qwen_rocm_ctx *)opaque;
+    if (!ctx || !output || !weight || !input || rows <= 0 || cols <= 0 || batch <= 0) {
+        fprintf(stderr, "ROCm: invalid matmul arguments\n");
+        return -1;
+    }
     float *dw = resident_weight(ctx, weight, (size_t)rows * cols);
     float *dx = grow_device(&ctx->dx, &ctx->dx_bytes, (size_t)cols * batch * sizeof(float));
     float *dy = grow_device(&ctx->dy, &ctx->dy_bytes, (size_t)rows * batch * sizeof(float));
-    if (!dw || !dx || !dy) { fprintf(stderr, "ROCm: device allocation failed\n"); return; }
+    if (!dw || !dx || !dy) { fprintf(stderr, "ROCm: device allocation failed; using CPU\n"); return -1; }
     if (hipMemcpy(dx, input, (size_t)cols * batch * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
-        fprintf(stderr, "ROCm: input upload failed\n"); return;
+        fprintf(stderr, "ROCm: input upload failed; using CPU\n"); return -1;
     }
     const float alpha = 1.0f, beta = 0.0f;
     hipblasStatus_t status = hipblasSgemm(ctx->handle, HIPBLAS_OP_N, HIPBLAS_OP_N,
                                           batch, rows, cols, &alpha,
                                           dx, batch, dw, cols, &beta, dy, batch);
     if (status != HIPBLAS_STATUS_SUCCESS) {
-        fprintf(stderr, "ROCm: hipblasSgemm failed (%d)\n", (int)status);
-        return;
+        fprintf(stderr, "ROCm: hipblasSgemm failed (%d); using CPU\n", (int)status);
+        return -1;
     }
-    if (hipMemcpy(output, dy, (size_t)rows * batch * sizeof(float), hipMemcpyDeviceToHost) != hipSuccess)
-        fprintf(stderr, "ROCm: output download failed\n");
+    if (hipMemcpy(output, dy, (size_t)rows * batch * sizeof(float), hipMemcpyDeviceToHost) != hipSuccess) {
+        fprintf(stderr, "ROCm: output download failed; using CPU\n");
+        return -1;
+    }
+    return 0;
 }
 
-extern "C" void qwen_rocm_matvec_bf16(void *ctx, float *output,
-                                         const uint16_t *weight, const float *input,
-                                         int rows, int cols) {
-    qwen_rocm_matmat_bf16(ctx, output, weight, input, rows, cols, 1);
+extern "C" int qwen_rocm_matvec_bf16(void *ctx, float *output,
+                                      const uint16_t *weight, const float *input,
+                                      int rows, int cols) {
+    return qwen_rocm_matmat_bf16(ctx, output, weight, input, rows, cols, 1);
 }

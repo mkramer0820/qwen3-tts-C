@@ -1,0 +1,10 @@
+# Install torch and torchaudio separately from the same PyTorch ROCm wheel index.
+accelerate>=1.0
+librosa>=0.10
+lz4>=4.3
+numpy>=1.26
+peft>=0.13
+qwen-tts
+safetensors>=0.4
+soundfile>=0.12
+transformers>=4.50

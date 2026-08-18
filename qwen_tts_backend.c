@@ -29,12 +29,12 @@
 static void cpu_matvec_bf16(qwen_backend_t *b, float *y,
                             const uint16_t *W, const float *x, int rows, int cols) {
     (void)b;
-    qwen_matvec_bf16(y, W, x, rows, cols);
+    qwen_matvec_bf16_cpu(y, W, x, rows, cols);
 }
 static void cpu_matmat_bf16(qwen_backend_t *b, float *Y,
                             const uint16_t *W, const float *X, int rows, int cols, int B) {
     (void)b;
-    qwen_matmat_bf16(Y, W, X, rows, cols, B);
+    qwen_matmat_bf16_cpu(Y, W, X, rows, cols, B);
 }
 static void cpu_free(qwen_backend_t *b) { free(b); }
 
@@ -68,11 +68,13 @@ static void metal_free(qwen_backend_t *b) {
 #ifdef QWEN_HAVE_ROCM
 static void rocm_matvec_bf16(qwen_backend_t *b, float *y,
                              const uint16_t *W, const float *x, int rows, int cols) {
-    qwen_rocm_matvec_bf16(b->impl, y, W, x, rows, cols);
+    if (qwen_rocm_matvec_bf16(b->impl, y, W, x, rows, cols) != 0)
+        cpu_matvec_bf16(b, y, W, x, rows, cols);
 }
 static void rocm_matmat_bf16(qwen_backend_t *b, float *Y,
                              const uint16_t *W, const float *X, int rows, int cols, int B) {
-    qwen_rocm_matmat_bf16(b->impl, Y, W, X, rows, cols, B);
+    if (qwen_rocm_matmat_bf16(b->impl, Y, W, X, rows, cols, B) != 0)
+        cpu_matmat_bf16(b, Y, W, X, rows, cols, B);
 }
 static void rocm_free(qwen_backend_t *b) {
     if (b->impl) qwen_rocm_free(b->impl);
@@ -245,6 +247,10 @@ int qwen_gpu_selftest(qwen_backend_kind_t kind, void *out) {
     if (kind == QWEN_BACKEND_METAL && qwen_metal_available())
         return qwen_metal_selftest(out);
 #endif
+    if (kind != QWEN_BACKEND_CPU && !qwen_backend_available(kind)) {
+        fprintf(f, "gpu-selftest: FAIL (requested GPU backend is unavailable)\n");
+        return 1;
+    }
     const int rows = 2048, cols = 2048, B = 8;
     int fails = 0;
 
@@ -267,10 +273,19 @@ int qwen_gpu_selftest(qwen_backend_kind_t kind, void *out) {
 
     qwen_backend_t *cpu = make_cpu();
     qwen_backend_t *gpu = qwen_backend_init(kind);
+    if (!cpu || !gpu) {
+        fprintf(f, "gpu-selftest: backend allocation failed\n");
+        qwen_backend_free(cpu); qwen_backend_free(gpu);
+        free(W); free(x); free(X); free(y_cpu); free(y_gpu); free(Y_cpu); free(Y_gpu);
+        return 1;
+    }
     fprintf(f, "gpu-selftest: backend='%s' (requested %d)  shape rows=%d cols=%d B=%d\n",
             gpu->name, (int)kind, rows, cols, B);
     if (gpu->kind == QWEN_BACKEND_CPU && kind != QWEN_BACKEND_CPU) {
-        fprintf(f, "  NOTE: GPU backend unavailable — nothing to validate against CPU.\n");
+        fprintf(f, "gpu-selftest: FAIL (requested GPU backend is unavailable)\n");
+        qwen_backend_free(cpu); qwen_backend_free(gpu);
+        free(W); free(x); free(X); free(y_cpu); free(y_gpu); free(Y_cpu); free(Y_gpu);
+        return 1;
     }
 
     /* ---- matvec correctness ---- */

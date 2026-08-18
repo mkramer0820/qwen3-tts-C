@@ -100,6 +100,8 @@ void qwen_rms_norm_per_head(float *x, const float *weight,
 /* bf16 matvec: y[rows] = W[rows,cols] @ x[cols]  (W is bf16, x/y are f32)
  * NEON-optimized + multi-threaded via dispatch_apply on macOS. */
 void qwen_matvec_bf16(float *y, const uint16_t *W, const float *x, int rows, int cols);
+/* Explicit CPU entry points used when an optional GPU operation fails. */
+void qwen_matvec_bf16_cpu(float *y, const uint16_t *W, const float *x, int rows, int cols);
 
 /* Optional GPU offload hook for qwen_matvec_bf16 (and the bf16 QKV fused path).
  * NULL = CPU default. Installed by the Metal/CUDA backend when --backend is set. */
@@ -113,6 +115,7 @@ extern void (*g_qwen_matmat_bf16_hook)(float *, const uint16_t *, const float *,
  * (amortizes the per-token weight re-read that bounds single-stream). B<=64.
  * Threaded by row-slice, matching qwen_matvec_bf16. With B==1 it equals matvec. */
 void qwen_matmat_bf16(float *Y, const uint16_t *W, const float *X, int rows, int cols, int B);
+void qwen_matmat_bf16_cpu(float *Y, const uint16_t *W, const float *X, int rows, int cols, int B);
 
 /* INT8 batched matmat twin (Y[rows,B] = (W_int8*scale) @ X[cols,B]). Low precision
  * is where batching pays MOST: int8 halves the weight read. Same compile-time-B

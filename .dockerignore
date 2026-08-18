@@ -1,0 +1,12 @@
+.git
+.github
+*.wav
+*.safetensors
+*.qvoice
+*.expr
+qwen3-tts-*/
+models/
+outputs/
+out_lora*/
+training/expressivity-lora/data/
+training/expressivity-lora/out*/
