@@ -1,7 +1,7 @@
 /*
  * qwen_tts_backend.c — backend resolver + CPU default (G1 seam).
  *
- * Compiled into the GPU build targets (`make metal` / `make cuda`), NOT into the
+ * Compiled into GPU build targets (`make metal` / `make cuda` / `make rocm`), NOT into the
  * default `make blas` (which stays byte-identical). The CPU thunks forward to
  * the existing kernels, so a GPU backend that only implements SOME ops can be
  * mixed with CPU for the rest by copying the CPU thunk into the empty slots.
@@ -20,6 +20,9 @@
 #endif
 #ifdef QWEN_HAVE_CUDA
 #include "qwen_tts_cuda.h"
+#endif
+#ifdef QWEN_HAVE_ROCM
+#include "qwen_tts_rocm.h"
 #endif
 
 /* ---- CPU thunks (the default; always available) ------------------------- */
@@ -62,6 +65,21 @@ static void metal_free(qwen_backend_t *b) {
 }
 #endif
 
+#ifdef QWEN_HAVE_ROCM
+static void rocm_matvec_bf16(qwen_backend_t *b, float *y,
+                             const uint16_t *W, const float *x, int rows, int cols) {
+    qwen_rocm_matvec_bf16(b->impl, y, W, x, rows, cols);
+}
+static void rocm_matmat_bf16(qwen_backend_t *b, float *Y,
+                             const uint16_t *W, const float *X, int rows, int cols, int B) {
+    qwen_rocm_matmat_bf16(b->impl, Y, W, X, rows, cols, B);
+}
+static void rocm_free(qwen_backend_t *b) {
+    if (b->impl) qwen_rocm_free(b->impl);
+    free(b);
+}
+#endif
+
 #ifdef QWEN_HAVE_CUDA
 static void cuda_matvec_bf16(qwen_backend_t *b, float *y,
                              const uint16_t *W, const float *x, int rows, int cols) {
@@ -92,6 +110,12 @@ int qwen_backend_available(qwen_backend_kind_t kind) {
 #else
             return 0;
 #endif
+        case QWEN_BACKEND_ROCM:
+#ifdef QWEN_HAVE_ROCM
+            return qwen_rocm_available();
+#else
+            return 0;
+#endif
     }
     return 0;
 }
@@ -100,6 +124,7 @@ qwen_backend_kind_t qwen_backend_kind_from_str(const char *s) {
     if (!s) return QWEN_BACKEND_CPU;
     if (strcasecmp(s, "metal") == 0) return QWEN_BACKEND_METAL;
     if (strcasecmp(s, "cuda")  == 0) return QWEN_BACKEND_CUDA;
+    if (strcasecmp(s, "rocm")  == 0 || strcasecmp(s, "hip") == 0) return QWEN_BACKEND_ROCM;
     return QWEN_BACKEND_CPU;
 }
 
@@ -142,6 +167,27 @@ qwen_backend_t *qwen_backend_init(qwen_backend_kind_t want) {
         fprintf(stderr, "backend: CUDA requested but unavailable — using CPU\n");
 #else
         fprintf(stderr, "backend: CUDA not compiled in (build with `make cuda`) — using CPU\n");
+#endif
+        return make_cpu();
+    }
+
+    if (want == QWEN_BACKEND_ROCM) {
+#ifdef QWEN_HAVE_ROCM
+        if (qwen_rocm_available()) {
+            void *impl = qwen_rocm_init();
+            if (impl) {
+                qwen_backend_t *b = calloc(1, sizeof(*b));
+                if (!b) { qwen_rocm_free(impl); return make_cpu(); }
+                b->kind = QWEN_BACKEND_ROCM; b->name = "rocm"; b->impl = impl;
+                b->matvec_bf16 = rocm_matvec_bf16;
+                b->matmat_bf16 = rocm_matmat_bf16;
+                b->free = rocm_free;
+                return b;
+            }
+        }
+        fprintf(stderr, "backend: ROCm requested but unavailable — using CPU\n");
+#else
+        fprintf(stderr, "backend: ROCm not compiled in (build with `make rocm`) — using CPU\n");
 #endif
         return make_cpu();
     }

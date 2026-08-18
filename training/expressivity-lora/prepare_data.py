@@ -16,6 +16,7 @@
 
 import argparse
 import json
+import torch
 
 from qwen_tts import Qwen3TTSTokenizer
 
@@ -23,11 +24,16 @@ BATCH_INFER_NUM = 32
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--device", type=str, default="auto",
+                        help="PyTorch device (auto, cuda:0, cpu). ROCm uses cuda:0 through PyTorch's HIP compatibility API")
     parser.add_argument("--tokenizer_model_path", type=str, default="Qwen/Qwen3-TTS-Tokenizer-12Hz")
     parser.add_argument("--input_jsonl", type=str, required=True)
     parser.add_argument("--output_jsonl", type=str, required=True)
     args = parser.parse_args()
+    if args.device == "auto":
+        args.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    backend = f"ROCm/HIP {torch.version.hip}" if torch.version.hip else "CUDA/CPU"
+    print(f"audio-code device: {args.device} ({backend})")
 
     tokenizer_12hz = Qwen3TTSTokenizer.from_pretrained(
         args.tokenizer_model_path,

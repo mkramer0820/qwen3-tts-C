@@ -33,10 +33,23 @@ def train():
     ap.add_argument("--lora_r", type=int, default=32)
     ap.add_argument("--lora_alpha", type=int, default=64)   # keep alpha = 2*r
     ap.add_argument("--lora_dropout", type=float, default=0.05)
+    ap.add_argument("--mixed_precision", choices=["bf16", "fp16", "no"], default="bf16")
+    ap.add_argument("--require-rocm", action="store_true",
+                    help="fail before loading the model unless this is a ROCm/HIP PyTorch build with a visible GPU")
     args = ap.parse_args()
 
-    acc = Accelerator(gradient_accumulation_steps=4, mixed_precision="bf16")
-    qwen3tts = Qwen3TTSModel.from_pretrained(args.init_model_path, torch_dtype=torch.bfloat16,
+    if args.require_rocm:
+        if torch.version.hip is None:
+            raise RuntimeError("--require-rocm was set, but torch.version.hip is None (wrong PyTorch wheel)")
+        if not torch.cuda.is_available():
+            raise RuntimeError("--require-rocm was set, but no ROCm GPU is visible")
+    dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "no": torch.float32}[args.mixed_precision]
+    acc = Accelerator(gradient_accumulation_steps=4, mixed_precision=args.mixed_precision)
+    if acc.is_main_process:
+        backend = f"ROCm/HIP {torch.version.hip}" if torch.version.hip else "CUDA/CPU"
+        device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+        print(f"[device] {backend}; {device_name}; precision={args.mixed_precision}")
+    qwen3tts = Qwen3TTSModel.from_pretrained(args.init_model_path, torch_dtype=dtype,
                                              attn_implementation="eager")
     config = AutoConfig.from_pretrained(args.init_model_path)
 

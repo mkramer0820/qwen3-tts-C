@@ -50,7 +50,7 @@ make blas
 
 - **Pure C, minimal dependencies** — Only requires a C compiler and BLAS. No Python runtime needed.
 - **Runs on macOS, Linux and Windows/WSL2 (ARM/x86)** — the hot matvec/attention kernels have **NEON+SDOT (ARM), AVX2 and AVX-512/VNNI (x86)** twins with a scalar fallback + runtime ISA guard, and decode threading runs on a **cross-OS pool** (GCD on macOS, pthread elsewhere). Validated on Apple M1, Ryzen 7 6800H, and EPYC 9555P (Zen5). Single-stream RTF is memory/cache-bound, so the chip's cache matters most (see [Performance](#performance)); measure yours with `bash tests/x86_bench.sh`.
-- **Optional GPU backends (opt-in)** — **Apple Metal** (`make metal`) and **NVIDIA CUDA** (`make cuda`) run the whole fused pipeline resident on the GPU (**0.28 RTF** for 0.6B on an M4; ~0.44 for 1.7B on a mainstream NVIDIA GPU), plus server request-batching for throughput. CPU stays the default. → [Performance § GPU backends](#performance) · [docs/hardware-testing.md](docs/hardware-testing.md) (Metal) · [docs/cuda-performance.md](docs/cuda-performance.md) (CUDA).
+- **Optional GPU backends (opt-in)** — **Apple Metal** (`make metal`) and **NVIDIA CUDA** (`make cuda`) provide fused resident pipelines; **AMD ROCm/HIP** (`make rocm`) provides correctness-first bf16 matrix offload. CPU stays the default. → [Performance § GPU backends](#performance) · [AMD ROCm](docs/amd-rocm.md) · [Metal](docs/hardware-testing.md) · [CUDA](docs/cuda-performance.md).
 - **Both model sizes** — Automatically detects 0.6B or 1.7B from weight files.
 - **9 preset voices** — `ryan`, `vivian`, `serena`, `aiden`, `eric`, `dylan`, `uncle_fu`, `ono_anna`, `sohee`.
 - **10 languages** — English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian.
@@ -482,11 +482,15 @@ total throughput on bandwidth-bound boxes. Measure it on your CPU with `make ben
 > Per-component breakdown, full GPU table, optimization history → [docs/performance.md](docs/performance.md)
 > x86 AVX2/AVX-512/VNNI findings + how to benchmark your CPU → [docs/x86-optimization.md](docs/x86-optimization.md)
 
-### 🖥️ GPU backends — Apple Metal & NVIDIA CUDA (opt-in)
+### 🖥️ GPU backends — Apple Metal, NVIDIA CUDA & AMD ROCm (opt-in)
 
 Optional `--backend metal|cuda` runs the **whole fused pipeline resident on the GPU** (weights + KV +
 activations on device, one command buffer / step). The CPU path stays the default — GPU is purely additive.
 Full numbers: [Metal / Apple Silicon](docs/hardware-testing.md) · [CUDA / NVIDIA](docs/cuda-performance.md).
+
+AMD GPUs can use `make rocm ROCM_ARCH=gfx1201` and `--backend rocm`. The initial
+HIP/hipBLAS backend keeps converted weights resident but synchronizes activations
+per matrix operation; other kernels retain the CPU fallback. See [AMD ROCm](docs/amd-rocm.md).
 
 **Apple Metal** — `make metal CC=clang`, then `QWEN_METAL_FUSED_TALKER=1 ./qwen_tts --backend metal`.
 **Single-stream latency** (one request — CLI, or a warm `--serve` server; the two match):
