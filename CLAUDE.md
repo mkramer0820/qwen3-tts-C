@@ -1,26 +1,12 @@
-> ## ⚓ CONTINUITY PROTOCOL — DO THIS FIRST, EVERY SESSION
-> Before acting, READ: **`docs/PROJECT-COMPASS.md`** (mission, how-we-work, quality criteria, the ACTIVE epic
-> + experiment trail) → then the auto-memory `MEMORY.md` index → then the active plan (`plan_emo_v3.md`).
-> The reasoning behind what we do — objectives, WHY, methodology, what's already decided/tried — lives there,
-> not just in code. Do NOT re-derive from scratch or re-ask what was settled days ago. Keep the thread.
-> When you finish a meaningful thread or experiment, UPDATE the Compass experiment-index + the relevant memory.
->
-> 🎯 **EMOTION IS SOLVED — THE recipe is `docs/emotion-THE-recipe.md` (single source of truth, mirrored in
-> `main.c`).** ONE rule: **preset voice → pure STEER `ryan_<emo>` @ w12** (clean, every language); **cloned voice
-> → COMBINE** (language `.expr` + steer). Use the **native preset per language** (JA `ono_anna`, KO `sohee`, ZH
-> `vivian`, EN/Romance `ryan`). Exposed as the `--emotion <sad|joy|anger|fear|disgust|surprise>` flag. Ear-validated
-> 2026-06-29, committed + pushed. Paralinguistics = inline `[laugh]`/`[sigh]` tags. **Do NOT re-derive from the old
-> abandoned methods** (graft/x-vector/τ-vectors/`.vec`/dense-FT/per-language EXPR-COMBINE — all archived in
-> `docs/archive/`). Read THE recipe, don't re-spelunk weeks of experiments.
->
-> 🔬 **PARALINGUISTIC `[tag]` METHOD + TEST LOG — read `docs/para-experiments.md` BEFORE any para experiment.**
-> ONE method only: **INLINE native-trigger** (onomatopoeia inside the sentence, ONE generation → event in the
-> voice's own timbre, mixed in). ❌ **NEVER the split-span / steering-span "splice"** (separate cold-prefill span
-> = sounds like a different voice — rejected by ear 2026-07-01). The doc is the durable WIN/KO table by
-> onomatopoeia × seed × language × emotion × speaker — do NOT re-run a KO combo; promote WINs into the `[tag]`
-> map. Companion **`docs/para-target.md`** = the desiderata menu (what pros do, what we want, variants).
-> Shipped mapping: `[laugh]`→`哈哈哈` s7 (universal); `[sigh]`→`唉` s42 (ryan/clone) / `ahh` s7 (vivian); comma-
-> delimited inline, one generation, seed pinned per-tag. The split-span "splice" is DELETED — never bring it back.
+# Agent guide
+
+Read `README.md`, `PLAN.md`, and `docs/README.md` before changing behavior. For AMD
+work, also read `docs/rocm-review-handoff.md`. Do not rely on untracked personal
+memory files or private planning notes as repository prerequisites.
+
+The shipped emotion behavior is documented in `docs/emotion-THE-recipe.md`; the
+paralinguistic experiment record is `docs/para-experiments.md`. Superseded methods
+and old branch plans live in `docs/archive/` and are not current instructions.
 
 This file is the practical guide for agents working on this repository.
 It is intentionally implementation-oriented: what to change, where, how to test,
@@ -32,28 +18,27 @@ Pure C inference engine for Qwen3-TTS text-to-speech models:
 - `Qwen3-TTS-12Hz-0.6B-CustomVoice`
 - `Qwen3-TTS-12Hz-1.7B-CustomVoice`
 
-Primary target is CPU inference (BLAS + architecture-specific SIMD paths).
+CPU remains the default. Metal, CUDA, and ROCm are opt-in backends. The current
+fork's hardware acceptance target is the Radeon AI PRO R9700 through Ubuntu WSL2.
 
 ## Current Status
 
-- **All components verified correct** (Talker, Code Predictor, Speech Decoder — bit-identical to Python)
-- **Performance**: RTF ~1.3–1.7 on Apple M1 8-core, 16 GB RAM (4 threads)
-- **Dev hardware**: Apple M1 8-core, 16 GB RAM — all benchmarks reference this machine
+- Inherited CPU/Metal/CUDA validation and measurements retain their documented
+  provenance; they were not rerun for the ROCm fork.
+- ROCm has passed source review and static checks only.
+- No R9700 build, inference, training, cloning, expression, audio, or performance
+  result exists. Keep performance `Undetermined` until raw hardware evidence exists.
 
 ## Active Branches
 
-- **`main`**: Stable, production-ready code
-- **`feat/labs`**: Experimental branch for architecture tweaks, performance experiments, mixed optimizations, and general R&D. Use this for testing before merging to main.
+- **`AMD-rocm`**: current ROCm development and hardware-acceptance branch.
+- **`main`**: integration branch; do not assume it has unmerged `AMD-rocm` work.
 
-## CI/CD (planned, not yet implemented)
+## Validation rule
 
-After implementation, GitHub Actions will provide:
-- **Build matrix**: Linux x86/ARM, macOS ARM/x86, Windows/WSL2 (manual trigger only)
-- **CodeQL + clang-tidy**: Auto on PR to main (buffer overflow, UB, security checks)
-- **ASan/UBSan**: Auto on PR to main (runtime memory safety with real model)
-- **Benchmarks**: Per-runner CPU dump + ms/f breakdown as JSON artifacts
-- **Releases**: Static binaries per platform on tag push (`v*`)
-- See PLAN.md Phase 9 for full details
+Do not turn syntax checks, source review, Compose validation, or inherited benchmark
+tables into a hardware-support claim. Report exactly what ran, on which device, and
+which model/assets were used. See `PLAN.md` for the current gates.
 
 ## Source Of Truth
 
@@ -265,7 +250,8 @@ Emotion and paralinguistics (`[laugh]`/`[sigh]`/`[cough]`/`[breath]`…) are **S
 - The emotion plugin (CSP `.expr` FT band ~16-26 **+** `--ml-steer` L21-25 steering, applied TOGETHER) is the hard-won TOP WIN for both **presets AND cloned voices**. Adding paralinguistics MUST NOT regress, overwrite, or modify it.
 - Paralinguistics is an **EXTRA training-data set augmenting a DIFFERENT characteristic** that *couples* with emotion — a user who wants both loads para + emo together and quality improves, never degrades.
 - Therefore the para FT must target layers **DISJOINT from the emotion plugin's layers** (few layers, CSP-style) so the two `.expr` write different `talker.model.layers.N.` tensors and compose by summation with no interference.
-- Do **NOT** use a para band that overlaps emotion (e.g. 0-27 or 16-26) — it clobbers emotion. See memory `feedback_para_ft_band` + `project_para_recipe` and `plan_emo_v3.md` §9.11.
+- Do **NOT** use a para band that overlaps emotion (for example 0-27 or 16-26) —
+  it clobbers emotion. Preserve the disjoint-band contract recorded here.
 
 ## Experiment Tracking (Senior Rule — Do Not Skip)
 

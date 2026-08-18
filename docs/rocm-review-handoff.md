@@ -3,7 +3,8 @@
 Updated: 2026-08-18
 
 This is the current source of truth for independent review of the AMD ROCm fork.
-It replaces the older dated change-review and upstream-sync notes.
+It replaces the older dated change-review and upstream-sync notes. The final
+source-review follow-up is commit `df3aae4`.
 
 ## Status
 
@@ -11,6 +12,11 @@ It replaces the older dated change-review and upstream-sync notes.
 HIP source has been compiled for the Radeon AI PRO R9700, and no R9700 inference,
 training, cloning, expression, audio-quality, or performance result exists yet.
 Static validation does not change that status.
+
+Two independent review passes are complete. The second reviewer retracted its
+training-semantics finding after inspecting the exact `qwen-tts==0.1.1` and
+`transformers==4.57.3` wheels. This closes the source finding, not the hardware
+acceptance work.
 
 Primary target: AMD Radeon AI PRO R9700, RDNA4 `gfx1201`, 32 GiB, Windows 11 with
 Ubuntu 24.04 WSL2. Review scope also includes RDNA3/RDNA4 `gfx11*` and `gfx12*`.
@@ -25,6 +31,8 @@ MI/CDNA accelerators are not an acceptance target.
 - `c950a3a` accidentally deleted 87 newly merged files.
 - `e99b3d5` restores exactly those files; the two commits cancel each other.
 - `b05a1bb` adds the standalone review prompt only.
+- `a9bdda0` implements the review hardening and documentation consolidation.
+- `df3aae4` addresses final review follow-ups and is the reviewed static baseline.
 
 The 34-commit upstream merge includes the Ingot safetensors/GGUF migration, fused
 GPU Talker server replay fix, AVX-512 parity work, CI updates, and all 0.6B emotion
@@ -46,6 +54,8 @@ assets and cloned-voice directions. `README.md` was the only textual conflict.
 
 - The model-facing stack is pinned to `qwen-tts==0.1.1`,
   `transformers==4.57.3`, `accelerate==1.12.0`, and `peft==0.18.1`.
+- `qwen-tts` is the distribution name for the Qwen3-TTS Python implementation;
+  `0.1.1` is its package release, not the model generation.
 - In the ROCm workflow, Torch and torchaudio must remain matching 2.9.1 builds;
   local ROCm version suffixes are accepted while mismatched base versions fail.
 - CUDA/CPU training still enforces the shared model API pins but does not inherit

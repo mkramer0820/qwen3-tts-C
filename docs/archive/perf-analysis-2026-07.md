@@ -1,8 +1,12 @@
 # Performance analysis — MTP truth, bottlenecks, and the CPU optimization map (2026-07-02)
 
-*Analysis only (no code changed). Companion docs: `docs/hardware-testing.md` (ISA workflow + rented-box
-matrix), `docs/gpu-accel-analysis.md` (optional GPU backends), `docs/audit_engine-health-2026-07.md`
-(correctness/leak audit). TODOs tracked in `plan_v4.md` §E3.*
+> **Historical analysis.** Preserve this for optimization reasoning, but use
+> [`../performance.md`](../performance.md) for current benchmark provenance and
+> the still-unmeasured R9700 table.
+
+*Analysis only (no code changed). Current companion: [hardware testing](../hardware-testing.md).
+The GPU analysis is archived beside this file. References to `plan_v4.md` and the
+engine-health audit describe unavailable working notes from that session.*
 
 ---
 

@@ -1,5 +1,9 @@
 # Regression: cloned-voice emotion went FLAT — root cause + fix (2026-06-15)
 
+> **Historical regression investigation.** Use the current
+> [`../emotion-THE-recipe.md`](../emotion-THE-recipe.md) and
+> [`../speaker-map.md`](../speaker-map.md) for shipped behavior.
+
 **Symptom (user):** a few days ago `small ICL file + Italian expressivity LoRA + EN instruct + temp + CV model`
 emoted well on cloned voices (SAD was great). Now both the small-ICL clone AND the full `.qvoice` clone
 render FLAT. Suspected: (1) a C-engine regression, (2) the Italian LoRA retrained on a wider layer band

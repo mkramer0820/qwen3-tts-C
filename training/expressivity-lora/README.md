@@ -9,6 +9,10 @@ a second multi-GB model.
 You need: one CUDA or ROCm GPU (≈12 GB is plenty), Python, and an emotional-speech dataset in your
 target language. One run is ~10–20 min on a modern GPU.
 
+> The memory and runtime estimates above are inherited CUDA-era guidance. They have
+> not been measured on the R9700 or this ROCm container. The ROCm workflow remains
+> untested until the hardware checklist records a real short run and peak VRAM.
+
 AMD users should install matching ROCm builds of PyTorch and torchaudio, then run
 `python check_rocm.py` before preparing codes or training. See
 [`../../docs/amd-rocm.md`](../../docs/amd-rocm.md).
@@ -56,8 +60,10 @@ huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --local-dir models
 
 The requirements intentionally pin `qwen-tts`, Transformers, Accelerate, and
 PEFT because the trainer uses internal Talker APIs and depends on causal-label
-shifting behavior. Do not upgrade one of those packages independently; update
-the set together and rerun `check_rocm.py` plus a short training smoke test.
+shifting behavior. Here `qwen-tts==0.1.1` is the Python distribution containing
+the Qwen3-TTS classes, not an older model generation. Do not upgrade one package
+independently; update the set together and rerun `check_rocm.py` plus a short
+training smoke test.
 
 ### 1. Build a manifest from your dataset
 `prepare_manifest.py` turns a dataset of `(audio, transcript, emotion)` into 24 kHz-mono WAVs +

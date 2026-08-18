@@ -1,5 +1,10 @@
 # GPU acceleration status — CPU / Metal / CUDA, per accelerated code point
 
+> **Historical branch snapshot.** This records `feat/gpu-backends` and does not
+> describe the current `AMD-rocm` branch. Current ROCm status is in
+> [`../amd-rocm.md`](../amd-rocm.md); inherited measurements remain in
+> [`../performance.md`](../performance.md).
+
 Branch `feat/gpu-backends`. `make blas` (CPU-only) is the default and stays byte-identical;
 Metal/CUDA are opt-in (`make metal` / `make cuda`, `--backend metal|cuda`). `make cuda` auto-detects the
 CUDA toolkit (`nvcc` on `PATH` → `/usr/local/cuda` → `/opt/cuda`, the Arch Linux location); override with
@@ -59,7 +64,7 @@ kernels written** (🔷 GPU-compile-pending — no nvcc on the M1 dev box; each 
 - **CUDA** `qwen_tts_cuda.{h,c}` — cuBLAS-first (gcc, no nvcc); **weights RESIDENT** (converted+uploaded once,
   cached), dX/dY reused. bf16 GemmEx tensor cores + custom decode matvec + CUDA Graphs = G3b (NVIDIA GPU).
 
-## Ranked next (from the ggml/llama.cpp study — docs/gpu-accel-analysis.md + agent report)
+## Ranked next (from the ggml/llama.cpp study — archived GPU analysis + agent report)
 1. **One command buffer / CUDA-graph per Talker+CP step** — kills the 16×5-pass launch-overhead trap (the
    Qwen-TTS-specific trap). Prerequisite for real decode RTF.
 2. **Speech-decoder ConvNet offload + CPU/GPU overlap** — the one headline single-stream win on M1

@@ -1,5 +1,9 @@
 # Multi-speaker emotion FT — reproducible pipeline + findings (2026-06-16)
 
+> **Historical experiment record.** Commands, branch names, timing, and GPU-image
+> assumptions below predate the current pinned LoRA and ROCm workflows. For current
+> training use [`../../training/expressivity-lora/README.md`](../../training/expressivity-lora/README.md).
+
 Goal: make emotion **generalize** (across identities, and ideally to cloned voices) by fine-tuning the
 dense expressivity band **L16-26** on emotion spoken by **many speakers × many emotions**, instead of
 the EMOVO-only (6 Italian actors) set that produced a voice-specific result.

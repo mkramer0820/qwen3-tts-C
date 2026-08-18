@@ -8,10 +8,12 @@ intended AMD scope; AMD Instinct/CDNA/MI-series hardware is not a project target
 The fork remains cross-platform. CPU, Apple Metal, and NVIDIA CUDA paths are
 inherited and are not replaced by the ROCm work.
 
-> **Current status (2026-08-18): NOT HARDWARE TESTED.** ROCm source, Python, Docker
-> Compose, and PowerShell have passed static checks only. Nothing has been compiled
-> or run on the R9700 yet. There are no R9700 performance, training, cloning, or
-> audio-quality results. Do not treat inherited benchmarks below as ROCm results.
+> **Current status (2026-08-18): STATICALLY REVIEWED, NOT HARDWARE TESTED.** Two
+> independent source-review passes are complete through `df3aae4`. ROCm source,
+> Python, Docker Compose, and PowerShell have passed static checks only. Nothing has
+> been compiled or run on the R9700. No R9700 performance, training, cloning,
+> expression, or audio-quality result exists; inherited benchmarks are not ROCm
+> results.
 
 This branch is synchronized through upstream commit `328ab9c` (upstream
 `v0.19.2-1-g328ab9c`, 2026-08-05). See the current
@@ -30,8 +32,9 @@ compatibility decisions, remaining risks, and hardware acceptance checklist.
   librocdxg 1.2.0, and the R9700's `gfx1201` target.
 - Documented behavior for cloned `.qvoice` voices, metadata-only `--voice-name`,
   `--icl-only`, `.expr`, HTTP emotion handling, and quantization limitations.
-- Separate `rocm` and `cuda` Compose profiles so AMD support does not change the
-  existing NVIDIA image.
+- Separate `rocm` and `cuda` Compose profiles. The NVIDIA image now consumes the
+  same pinned model stack and verifies its CUDA Torch build, while ROCm-specific
+  requirements remain isolated to the AMD profile.
 
 ## R9700 Windows Quick Start
 
@@ -741,6 +744,7 @@ concurrent users in roughly the time of one by reading each weight once for all 
 
 | Guide | Contents |
 |-------|----------|
+| [Documentation index](docs/README.md) | Current guides, ROCm status, and historical archive boundary |
 | [ROCm Docker on Windows/WSL2](docs/rocm-wsl-docker.md) | R9700 setup, doctor, build, inference, cloning, expression, and training commands |
 | [AMD ROCm backend](docs/amd-rocm.md) | HIP inference behavior, PyTorch training, fallback, architecture, and quantization limits |
 | [ROCm independent review](docs/rocm-review-handoff.md) | Exact code changes, reviewed findings, untested areas, and hardware acceptance checklist |

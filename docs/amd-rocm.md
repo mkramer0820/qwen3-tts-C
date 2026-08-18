@@ -14,6 +14,10 @@ This branch implements AMD GPU paths in two independent places:
    `--backend rocm`. It offloads bf16 matrix-vector and batched matrix operations;
    operations without a ROCm implementation continue on CPU.
 
+The training dependency named `qwen-tts==0.1.1` is the published Python package
+that contains the Qwen3-TTS implementation and `Qwen3TTSModel`; it is not a model
+generation or a replacement for the 0.6B/1.7B Qwen3-TTS checkpoints.
+
 For a guided AMD Radeon AI PRO R9700 setup on Windows, use the separate ROCm
 container profile described in [ROCm Docker on Windows/WSL2](rocm-wsl-docker.md).
 It does not replace the repository's existing CUDA image or native build paths.

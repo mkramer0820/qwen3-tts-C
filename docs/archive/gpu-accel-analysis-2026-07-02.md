@@ -1,5 +1,10 @@
 # Optional GPU acceleration — backends, dependency weight, realistic gains (2026-07-02)
 
+> **Historical design analysis.** Metal and CUDA were implemented after this was
+> written, and ROCm now exists as an untested opt-in backend. Use
+> [`../amd-rocm.md`](../amd-rocm.md) and [`../performance.md`](../performance.md)
+> for current behavior and evidence.
+
 *Analysis only. Ground rule: the project is and stays **CPU-first, minimal, plain-Makefile**. GPU
 backends live on experimental branches, are opt-in build targets, and must not change `make blas` at all.
 TODOs in `plan_v4.md` §E4.*

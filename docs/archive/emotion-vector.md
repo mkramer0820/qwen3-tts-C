@@ -90,7 +90,7 @@ warnings are a red herring — the mod-2¹⁶ wrap is lossless; ignore the count
 - Full dense FT on mixed multilingual emotion data **corrupted Italian pronunciation** ("foreigner speaking
   Italian") because it was 97.7% English and rewrote the SHARED pronunciation weights. Adding a language tag
   helped gentle emotions (sad) but not aggressive ones (anger) — data-starved (~84 IT anger clips vs the
-  literature's 1–30 h/emotion). See [`../training/expressivity-lora/MULTISPEAKER_PIPELINE.md`].
+  literature's 1–30 h/emotion). See the [archived multi-speaker pipeline](multispeaker-emotion-pipeline-2026-06-16.md).
 - The emotion *vector* avoids this: backbone frozen, pronunciation untouched, low-data, language-safe.
 
 ## Open / next
@@ -103,6 +103,7 @@ warnings are a red herring — the mod-2¹⁶ wrap is lossless; ignore the count
 - Tune the canonical α per emotion if needed (default 1.0).
 
 ## Links
-- Deep history + reproduce: [`../training/expressivity-lora/MULTISPEAKER_PIPELINE.md`]
-- Roadmap / decisions: `PLAN.md` (local-only) — "SESSION 2026-06-16" block.
-- Builder: [`../tests/tau_arith.py`]; FT: [`../training/expressivity-lora/gpu_sft_expr_lang.py`].
+- Deep history + reproduce: [archived multi-speaker pipeline](multispeaker-emotion-pipeline-2026-06-16.md)
+- Historical roadmap: [roadmap-2026-06-04.md](roadmap-2026-06-04.md)
+- Builder: [`../../tests/tau_arith.py`](../../tests/tau_arith.py); the historical FT
+  procedure is preserved in the multi-speaker pipeline above.

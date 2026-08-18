@@ -1,4 +1,4 @@
-# Install torch and torchaudio separately from the same PyTorch ROCm wheel index.
+# Install a matching platform-appropriate torch/torchaudio pair before this file.
 # Model-facing packages are exact because train_lora.py uses internal Talker APIs
 # and depends on Transformers' causal-label shifting behavior.
 accelerate==1.12.0

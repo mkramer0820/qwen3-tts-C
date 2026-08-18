@@ -50,7 +50,8 @@ reducing memory usage and (for INT8) improving speed.
   Talker word accuracy (teacher-forced code0) **83.9% → 90.9%**, and the 1.7B int4 duration
   stretch vs bf16 gold drops from **+71% to +22%** on the A/B sentence. Applies to every
   `--int4`/`--quant-mixed` config on every ISA (Metal/CUDA included — single quantizer).
-  `QWEN_Q4_NAIVE=1` restores the old quantizer for A/B. Full study: `docs/quant-sub4.md`.
+  `QWEN_Q4_NAIVE=1` restores the old quantizer for A/B. Full study:
+  [archived sub-4-bit experiment](archive/quant-sub4-2026-07-14.md).
 
 ## Comparison (Apple M1 8-core, 16 GB, `-j4`, 2026-07 state)
 

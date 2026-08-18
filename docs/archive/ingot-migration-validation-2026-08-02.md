@@ -1,5 +1,8 @@
 ## Validazione migrazione ingot — 2026-08-02, Mac M1 (branch feat/migration-ingotlib)
 
+> **Completed historical validation record.** These results apply to the stated M1
+> migration run. They are not ROCm or R9700 test evidence.
+
 Tutto su pesi veri. Verde:
 - test-all (exit 0, 57 PASS): small 5/5, large config+EN+IT+instruct,
   regression, errors, emotion + emotion-ft, compose, caps, selftest,

@@ -13,9 +13,11 @@ The versions in this guide were checked on 2026-08-18 against AMD's
 [ROCm PyTorch container](https://rocm.docs.amd.com/projects/radeon-ryzen/en/docs-7.2.1/docs/install/installrad/native_linux/install-pytorch.html)
 instructions.
 
-The repository remains cross-platform. The existing CUDA image is unchanged;
-`compose.yaml` provides separate `cuda` and `rocm` profiles. Native CPU, CUDA,
-Metal, and ROCm builds continue to use their existing Makefile targets.
+The repository remains cross-platform. `compose.yaml` provides separate `cuda`
+and `rocm` profiles. The CUDA image shares the pinned Qwen3-TTS model dependencies
+and verifies that CUDA-enabled Torch survives installation; ROCm host/runtime
+requirements remain isolated to the AMD profile. Native CPU, CUDA, Metal, and ROCm
+builds continue to use separate Makefile targets.
 
 ## What you need on Windows
 

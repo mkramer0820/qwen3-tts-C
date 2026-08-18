@@ -79,10 +79,11 @@ natively-Italian, expressive voice. Going from "moves a bit" → "everything WOW
 a richer, varied Italian dataset (prosody + paralinguistics) + a **DENSE** fine-tune on a **wider** band (L00–12
 language/prosody **+** L16–26 emotion) — DENSE, *not* the low-rank broad-band that flattened clones.
 
-> **🔴 Gotcha (see `regression_lora.md` §7):** a DENSE `.expr` is a bf16 **bit-delta** → valid **only on
+> **🔴 Gotcha (see the [archived regression investigation](archive/cloned-voice-emotion-regression-2026-06-15.md) §7):** a DENSE `.expr` is a bf16 **bit-delta** → valid **only on
 > CV-intact weights** (preset / `--icl-only` graft / small-ICL). Applied on a **full-WDELTA** load it corrupts
 > the bits → metallic garble. The graft (x-vector, no ref_codes anchor) is the recipe; full-WDELTA is not.
 
-See also: `docs/prosody-map.md` (the per-layer measurements), `regression_lora.md` (dense-vs-LoRA + the recipe),
-`docs/emotion-THE-recipe.md` (the emotion recipe), `docs/icl-graft-portability.md` (x-vector-only default vs ICL),
-`docs/csp-ft-emotion.md`.
+See also: [prosody-map.md](prosody-map.md), the
+[archived regression investigation](archive/cloned-voice-emotion-regression-2026-06-15.md),
+[emotion-THE-recipe.md](emotion-THE-recipe.md),
+[icl-graft-portability.md](icl-graft-portability.md), and [csp-ft-emotion.md](csp-ft-emotion.md).

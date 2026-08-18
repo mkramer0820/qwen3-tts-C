@@ -160,4 +160,6 @@ make blas SIMD=avx512vnni
 QWEN_Q4_VNNI_V3=0 ./qwen_tts --self-test  # v2, for comparison
 ```
 
-Full engineering write-up (every measurement, every rejected idea) is in [`docs/pr17-review.md`](../docs/pr17-review.md); the hardware matrix is in [`docs/hardware-testing.md`](../docs/hardware-testing.md).
+Full engineering write-up (every measurement, every rejected idea) is in the
+[archived PR 17 review](../docs/archive/pr17-review-2026-07-10.md); the hardware
+matrix is in [hardware testing](../docs/hardware-testing.md).

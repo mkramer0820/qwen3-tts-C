@@ -1,5 +1,8 @@
 # Speculative decoding for this TTS — analysis (idea-spanning, not yet built)
 
+> **Archived idea analysis.** Speculative decoding is not implemented or scheduled
+> in the current roadmap. Conclusions below remain hypotheses.
+
 A brainstorm TODO: does speculative decoding (or a relative) make sense for Qwen3-TTS in this
 engine, and if so where/how? Conclusions are hypotheses to validate, not facts.
 
