@@ -11,9 +11,12 @@
 #include <hipblas/hipblas.h>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
+#include <new>
 
 struct weight_cache_entry { const void *key; size_t count; float *device; };
 struct qwen_rocm_ctx {
+    std::mutex mutex;
     hipblasHandle_t handle;
     weight_cache_entry *weights;
     int count, capacity;
@@ -33,11 +36,11 @@ extern "C" int qwen_rocm_available(void) {
 }
 
 extern "C" void *qwen_rocm_init(void) {
-    qwen_rocm_ctx *ctx = (qwen_rocm_ctx *)calloc(1, sizeof(*ctx));
+    qwen_rocm_ctx *ctx = new (std::nothrow) qwen_rocm_ctx{};
     if (!ctx) return nullptr;
     if (hipblasCreate(&ctx->handle) != HIPBLAS_STATUS_SUCCESS) {
         fprintf(stderr, "ROCm: hipblasCreate failed\n");
-        free(ctx);
+        delete ctx;
         return nullptr;
     }
     return ctx;
@@ -51,7 +54,7 @@ extern "C" void qwen_rocm_free(void *opaque) {
     if (ctx->dx) hipFree(ctx->dx);
     if (ctx->dy) hipFree(ctx->dy);
     if (ctx->handle) hipblasDestroy(ctx->handle);
-    free(ctx);
+    delete ctx;
 }
 
 static float *resident_weight(qwen_rocm_ctx *ctx, const uint16_t *weight, size_t count) {
@@ -105,6 +108,7 @@ extern "C" int qwen_rocm_matmat_bf16(void *opaque, float *output,
         fprintf(stderr, "ROCm: invalid matmul arguments\n");
         return -1;
     }
+    std::lock_guard<std::mutex> lock(ctx->mutex);
     float *dw = resident_weight(ctx, weight, (size_t)rows * cols);
     float *dx = grow_device(&ctx->dx, &ctx->dx_bytes, (size_t)cols * batch * sizeof(float));
     float *dy = grow_device(&ctx->dy, &ctx->dy_bytes, (size_t)rows * batch * sizeof(float));

@@ -20,7 +20,7 @@ outputs.
 | LoRA training | PyTorch ROCm BF16 | Undetermined steps/s | N/A | Undetermined | Not run |
 
 See [AMD ROCm](amd-rocm.md) for implementation limits and [the independent
-review checklist](rocm-change-review-2026-08-18.md) for required acceptance tests.
+review checklist](rocm-review-handoff.md) for required acceptance tests.
 
 ## Inherited Upstream Performance
 

@@ -4,6 +4,11 @@ set -euo pipefail
 action=${1:-setup}
 compose=(docker compose --profile rocm)
 docker_cmd=(docker)
+rocm_version=7.2.1
+rocdxg_version=1.2.0
+amdgpu_installer_version=7.2.1.70201-1
+amdgpu_installer_sha256=4c0338a241c15b12c14eb3aeb4012ea0d55dba681737ea8482248041a16c2afa
+rocdxg_sha256=3ed9526719290cd8f590150dad8ea0f234fa779bea6a4c9a8449d7ae6b8cfb6e
 
 # ROCm WSL device forwarding must use the engine in this Ubuntu distribution,
 # not a Docker Desktop socket injected by WSL integration.
@@ -20,28 +25,73 @@ die() {
     exit 1
 }
 
+package_version() {
+    dpkg-query -W -f='${Version}' "$1" 2>/dev/null || true
+}
+
+version_matches() {
+    local actual=$1 expected=$2
+    [[ $actual == "$expected" || $actual == "$expected".* || $actual == "$expected"-* ]]
+}
+
+download_verified() {
+    local url=$1 output=$2 expected_sha256=$3
+    wget -q "$url" -O "$output"
+    printf '%s  %s\n' "$expected_sha256" "$output" | sha256sum --check --status \
+        || die "SHA-256 verification failed for $url"
+}
+
+verify_host_rocm() {
+    local installed_rocm installed_rocdxg
+    installed_rocm=$(package_version rocm-core)
+    installed_rocdxg=$(package_version rocdxg-roct)
+    version_matches "$installed_rocm" "$rocm_version" \
+        || die "Expected rocm-core $rocm_version, found '${installed_rocm:-not installed}'. Remove the mismatched ROCm packages or install the documented version."
+    version_matches "$installed_rocdxg" "$rocdxg_version" \
+        || die "Expected rocdxg-roct $rocdxg_version, found '${installed_rocdxg:-not installed}'. ROCm 7.2.x maps to ROCDXG 1.2.0 in AMD's compatibility table."
+    [[ -r /opt/rocm/lib/librocdxg.so ]] || die 'ROCDXG is installed without /opt/rocm/lib/librocdxg.so.'
+    [[ -r /opt/rocm/share/rocdxg/dids.conf ]] || die 'ROCDXG is installed without dids.conf.'
+    printf 'Host ROCm packages: rocm-core=%s, rocdxg-roct=%s\n' "$installed_rocm" "$installed_rocdxg"
+}
+
 [[ $(uname -r) == *microsoft-standard-WSL2* ]] || die 'This setup must run inside an Ubuntu WSL2 distribution.'
 source /etc/os-release
 [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || die 'Ubuntu 24.04 is required by the pinned ROCm container.'
 
 install_host_rocm() {
-    if [[ -e /dev/dxg && -r /opt/rocm/lib/librocdxg.so \
-          && -r /opt/rocm/share/rocdxg/dids.conf ]]; then
+    local installed_rocm installed_rocdxg
+    installed_rocm=$(package_version rocm-core)
+    installed_rocdxg=$(package_version rocdxg-roct)
+    if [[ -n $installed_rocm && -n $installed_rocdxg ]]; then
+        verify_host_rocm
         return
     fi
 
+    if [[ -n $installed_rocm ]] && ! version_matches "$installed_rocm" "$rocm_version"; then
+        die "Expected rocm-core $rocm_version, found '$installed_rocm'. Remove the mismatched ROCm packages before continuing."
+    fi
+    if [[ -n $installed_rocdxg ]] && ! version_matches "$installed_rocdxg" "$rocdxg_version"; then
+        die "Expected rocdxg-roct $rocdxg_version, found '$installed_rocdxg'. Remove the mismatched ROCDXG package before continuing."
+    fi
+
     [[ -e /dev/dxg ]] || die '/dev/dxg is missing. Install the current AMD Software: Adrenalin Edition Windows driver for WSL, run wsl --shutdown in PowerShell, and retry.'
-    step 'Installing AMD ROCm 7.2.1 and ROCDXG 1.2.0 for WSL'
+    step "Installing AMD ROCm $rocm_version and ROCDXG $rocdxg_version for WSL"
     sudo apt-get update
     sudo apt-get install -y ca-certificates wget
-    wget -q https://repo.radeon.com/amdgpu-install/7.2.1/ubuntu/noble/amdgpu-install_7.2.1.70201-1_all.deb -O /tmp/amdgpu-install.deb
-    sudo apt-get install -y /tmp/amdgpu-install.deb
-    sudo amdgpu-install -y --usecase=rocm --no-dkms
-    wget -q https://github.com/ROCm/librocdxg/releases/download/v1.2.0/rocdxg-roct_1.2.0_amd64.deb -O /tmp/rocdxg-roct.deb
-    sudo apt-get install -y /tmp/rocdxg-roct.deb
-
-    [[ -r /opt/rocm/lib/librocdxg.so ]] || die 'ROCDXG installed without librocdxg.so. Review the package errors above.'
-    [[ -r /opt/rocm/share/rocdxg/dids.conf ]] || die 'ROCDXG installed without dids.conf. Review the package errors above.'
+    if [[ -z $installed_rocm ]]; then
+        download_verified \
+            "https://repo.radeon.com/amdgpu-install/$rocm_version/ubuntu/noble/amdgpu-install_${amdgpu_installer_version}_all.deb" \
+            /tmp/amdgpu-install.deb "$amdgpu_installer_sha256"
+        sudo apt-get install -y /tmp/amdgpu-install.deb
+        sudo amdgpu-install -y --usecase=wsl,rocm --no-dkms
+    fi
+    if [[ -z $installed_rocdxg ]]; then
+        download_verified \
+            "https://github.com/ROCm/librocdxg/releases/download/v$rocdxg_version/rocdxg-roct_${rocdxg_version}_amd64.deb" \
+            /tmp/rocdxg-roct.deb "$rocdxg_sha256"
+        sudo apt-get install -y /tmp/rocdxg-roct.deb
+    fi
+    verify_host_rocm
 }
 
 install_docker() {

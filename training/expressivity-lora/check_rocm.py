@@ -5,6 +5,12 @@ import sys
 
 import torch
 
+from rocm_validation import (
+    check_training_packages,
+    require_rocm_device,
+    run_bf16_forward_backward,
+)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -13,6 +19,12 @@ def main():
                         help="only validate that this is a HIP wheel when hardware is not installed yet")
     args = parser.parse_args()
 
+    try:
+        packages = check_training_packages(require_rocm_stack=True)
+    except RuntimeError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 5
+    print("packages=" + ", ".join(f"{name}=={value}" for name, value in packages.items()))
     print(f"torch={torch.__version__}")
     print(f"hip={torch.version.hip}")
     if torch.version.hip is None:
@@ -25,26 +37,22 @@ def main():
         print("FAIL: ROCm PyTorch imports, but no GPU is visible", file=sys.stderr)
         return 2
 
-    props = torch.cuda.get_device_properties(0)
+    try:
+        props = require_rocm_device(require_bf16=True)
+    except RuntimeError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 3
     print(f"device={torch.cuda.get_device_name(0)}")
     print(f"properties={props}")
     arch = getattr(props, "gcnArchName", "unknown")
     print(f"arch={arch}")
 
-    bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
-    if not bf16_supported:
-        print("FAIL: this GPU/runtime does not report BF16 support", file=sys.stderr)
-        return 3
-
-    a = torch.randn(args.size, args.size, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-    b = torch.randn(args.size, args.size, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-    loss = (a @ b).float().square().mean()
-    loss.backward()
-    torch.cuda.synchronize()
-    if not torch.isfinite(loss) or not torch.isfinite(a.grad).all() or not torch.isfinite(b.grad).all():
-        print("FAIL: non-finite BF16 result or gradient", file=sys.stderr)
+    try:
+        loss = run_bf16_forward_backward(args.size)
+    except RuntimeError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
         return 4
-    print(f"PASS: BF16 forward/backward (loss={loss.item():.6f})")
+    print(f"PASS: BF16 forward/backward (loss={loss:.6f})")
     return 0
 
 

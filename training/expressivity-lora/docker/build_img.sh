@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-set -uo pipefail
-cd ~/qwen-ft/docker
+set -euo pipefail
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 echo "### building qwen-ft image..."
-docker build -t qwen-ft:latest . 2>&1 | tail -15
+docker build -t qwen-ft:latest -f "$script_dir/Dockerfile" "$script_dir/.." 2>&1 | tail -15
 echo "### smoke: torch+torchaudio+qwen-tts on GB10"
 docker run --rm --gpus all qwen-ft:latest python3 -c "
 import torch, torchaudio

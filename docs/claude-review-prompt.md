@@ -1,83 +1,88 @@
-# Claude review prompt
+# Final Claude review prompt
 
-Copy the text below into Claude while Claude is working in this repository.
+Copy the text below into Claude while it is working in this repository.
 
 ```text
-Review the current AMD-rocm branch as a senior C/C++, ROCm/HIP, PyTorch, Docker,
-and Windows/WSL engineer. This is a code review first: do not modify files until
-you have reported the findings and explained any proposed fixes.
+Perform a final code review of the current AMD-rocm branch as a senior C/C++,
+ROCm/HIP, PyTorch, Docker, and Windows/WSL engineer. Review first: do not modify
+files until you have reported findings and the repository owner approves fixes.
 
-Repository and history checks
+Repository checks
 
-1. Run:
-   git branch --show-current
-   git status -sb
-   git log -3 --oneline --decorate
+1. Run git branch --show-current, git status -sb, and git log -5 --oneline.
 2. Confirm the branch is AMD-rocm and the working tree is clean.
-3. The reviewed upstream merge is commit 7a74a0a. Commits c950a3a and e99b3d5
-   cancel each other; e99b3d5 restores the files accidentally deleted by c950a3a.
-   The current file tree should match 7a74a0a exactly.
-4. Confirm gabriele-mastrapasqua/qwen3-tts main through upstream commit 328ab9c
-   is an ancestor of the current branch.
+3. Confirm upstream commit 328ab9c is an ancestor of HEAD.
+4. The upstream merge is 7a74a0a. Commits c950a3a and e99b3d5 cancel each other.
+5. Commit b05a1bb is the pre-hardening review-prompt baseline. Review the complete
+   diff from b05a1bb to HEAD as well as interactions with the existing ROCm code.
 
-Start by reading:
+Read first
 
-- docs/rocm-change-review-2026-08-18.md
-- docs/upstream-sync-2026-08-18.md
+- docs/rocm-review-handoff.md
 - docs/amd-rocm.md
 - docs/rocm-wsl-docker.md
 - README.md
 
-Review scope
+Required review areas
 
-1. Find correctness bugs, build failures, regressions, unsafe fallbacks, memory or
-   lifetime problems, thread-safety problems, and missing error handling in the
-   ROCm/HIP inference backend.
-2. Verify the Ingot migration is complete for ROCm. In particular, confirm
-   make rocm builds and links third_party/ingot/libingot.a and no removed legacy
-   safetensors symbols remain reachable.
-3. Review CPU fallback after HIP allocation, copy, or hipBLAS failures. Confirm
-   fallback cannot recurse through the GPU hook and always produces valid output.
-4. Review backend selection and --gpu-selftest. A requested but unavailable ROCm
-   backend must return failure rather than comparing CPU against CPU and passing.
-5. Review RDNA3/RDNA4 architecture handling, especially Radeon AI PRO R9700
-   gfx1201. Do not broaden the requested hardware scope to MI/CDNA accelerators.
-6. Review Windows 11, Ubuntu 24.04 WSL2, Docker Engine, Compose, /dev/dxg,
-   librocdxg, GPU selection, paths containing spaces, and OneDrive-hosted checkout
-   behavior. AMD support must remain opt-in; CUDA, Metal, and CPU paths must remain
-   usable for the global repository.
-7. Review PyTorch ROCm LoRA training: dependency pins, ROCm/BF16 guards, label
-   alignment, codec tensor shape, text_projection coverage, save/resume, and .expr
-   export compatibility.
-8. Review voice cloning, .qvoice loading, metadata-only --voice-name behavior,
-   --icl-only, 0.6B emotion assets and cloned-voice directions, 1.7B .expr behavior,
-   HTTP emotion behavior, and INT4/quant-mixed restrictions.
-9. Review the merged upstream server replay fix and check that the ROCm merge did
-   not regress it.
-10. Check documentation for commands or claims that do not match the code.
+1. qwen_tts_rocm.cpp
+   - Verify std::mutex construction and destruction are correct after replacing
+     calloc/free with new/delete.
+   - Verify the lock covers every mutation/use of the weight cache, dx/dy buffers,
+     and hipBLAS handle without introducing recursion, deadlock, or bad fallback.
+   - Recheck hipblasSgemm dimensions, memory layout, and every failure path.
+
+2. Python training
+   - Verify rocm_validation.py package checks and BF16 forward/backward probe.
+   - Confirm qwen-tts 0.1.1, Transformers 4.57.3, Accelerate 1.12.0, and PEFT
+     0.18.1 are mutually compatible with the exact APIs used by train_lora.py.
+   - Independently validate main-talker label shifting and sub-talker hidden/codec
+     alignment against the installed qwen-tts source.
+   - Check finite loss/gradient handling under gradient accumulation and multiple
+     Accelerator processes, including whether all workers fail consistently.
+   - Check save/resume and .expr export behavior after the dependency pins.
+
+3. Docker and WSL
+   - Validate Dockerfile.rocm preserves matching ROCm Torch and torchaudio 2.9.1
+     builds after pip and executes package/API smoke checks at build time.
+   - Validate both Compose profiles; AMD changes must not alter CUDA defaults.
+   - Confirm the CUDA Docker build context still includes requirements.txt and
+     installs the shared pinned model stack without applying ROCm Torch checks.
+   - Audit rocm-wsl.sh version matching, partial installations, dpkg package names,
+     SHA-256 values, download URLs, quoting, and actionable error behavior.
+   - Confirm AMD still maps librocdxg 1.2.0 to ROCm 7.2.x/R9700. Do not recommend
+     a newer tag solely because it exists; require compatibility evidence.
+   - Check /dev/dxg, libdxcore, librocdxg, dids.conf, Docker Engine selection,
+     HIP_VISIBLE_DEVICES, gfx1201 detection, and OneDrive paths containing spaces.
+
+4. Global repository compatibility
+   - Confirm make rocm links Ingot and no removed safetensors reader is reachable.
+   - Confirm CPU fallback bypasses GPU hooks and always writes valid output.
+   - Confirm unavailable ROCm cannot produce a passing GPU self-test.
+   - Check CPU, CUDA, and Metal code/build behavior for regressions.
+   - Check voice cloning, voice-name metadata, --icl-only, 0.6B emotion assets,
+     1.7B .expr, HTTP emotion, and quantization restrictions against documentation.
 
 Evidence rules
 
-- Do not assume ROCm hardware testing passed.
-- No R9700 build, inference, training, cloning, expression, audio-quality, or
-  performance result has been established merely by static checks.
-- Keep R9700 performance values Undetermined unless supported by raw output from
-  the actual target machine.
-- Clearly separate source review, static validation, compilation, and hardware
-  execution evidence.
+- Do not assume an R9700 build, run, training job, clone, expression, audio test,
+  or benchmark passed. Static validation is not hardware evidence.
+- Keep all R9700 performance values Undetermined without raw target-machine logs.
+- Clearly separate source review, syntax/config checks, compilation, container
+  execution, model execution, and hardware results.
 
-Run every safe test available in the environment. At minimum, inspect the merge,
-run git diff --check, parse Python and PowerShell, validate both Compose profiles,
-and compile/test native targets where the required toolchains exist. State exactly
-which tests could not run and why.
+Run every safe test available. At minimum run git diff --check, Python compile or
+AST checks, PowerShell parsing, bash -n, and Docker Compose validation. Compile and
+test native targets only where the required toolchain exists. State every test not
+run and why.
 
-Output format
+Output
 
-1. Findings first, ordered by severity (critical, high, medium, low).
-2. For every finding, include file and line references, impact, reproduction or
-   reasoning, and a concrete recommended fix.
-3. List open questions and assumptions.
-4. List tests run with pass/fail/not-run status.
-5. Finish with a short verdict: approve, approve with follow-up, or changes
-   required. Do not approve solely because documentation or static checks pass.
+1. Findings first, ordered critical/high/medium/low.
+2. Include file:line, impact, reasoning or reproduction, and concrete fix.
+3. Identify any finding from the earlier review that remains unresolved.
+4. List assumptions and open questions.
+5. List tests with pass/fail/not-run status.
+6. End with approve, approve with follow-up, or changes required. Do not approve
+   solely because documentation and static checks pass.
 ```

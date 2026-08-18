@@ -8,13 +8,10 @@
 #       --lora_r 32 --lora_alpha 64 --num_epochs 8
 import argparse, json, os, random
 import torch
-from accelerate import Accelerator
 from dataset import TTSDataset
-from peft import LoraConfig, get_peft_model
-from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
+from rocm_validation import check_training_packages, require_rocm_device, run_bf16_forward_backward
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from transformers import AutoConfig
 
 # Codec token ids of the 9 built-in CustomVoice preset speakers (1.7B). Voice-agnostic training
 # injects a random one at the speaker slot per sample, so the LoRA learns emotion, not a timbre.
@@ -38,11 +35,17 @@ def train():
                     help="fail before loading the model unless this is a ROCm/HIP PyTorch build with a visible GPU")
     args = ap.parse_args()
 
+    check_training_packages(require_rocm_stack=args.require_rocm)
+    from accelerate import Accelerator
+    from peft import LoraConfig, get_peft_model
+    from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
+    from transformers import AutoConfig
+
     if args.require_rocm:
-        if torch.version.hip is None:
-            raise RuntimeError("--require-rocm was set, but torch.version.hip is None (wrong PyTorch wheel)")
-        if not torch.cuda.is_available():
-            raise RuntimeError("--require-rocm was set, but no ROCm GPU is visible")
+        require_rocm_device(require_bf16=args.mixed_precision == "bf16")
+        if args.mixed_precision == "bf16":
+            probe_loss = run_bf16_forward_backward(size=512)
+            print(f"[device] BF16 forward/backward probe passed (loss={probe_loss:.6f})")
     if args.mixed_precision == "bf16" and torch.cuda.is_available():
         bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)()
         if not bf16_supported:
@@ -57,6 +60,9 @@ def train():
                                              attn_implementation="eager")
     if not hasattr(qwen3tts.model.talker, "text_projection"):
         raise RuntimeError("installed qwen-tts is incompatible: Talker has no text_projection")
+    for required in ("code_predictor", "forward_sub_talker_finetune"):
+        if not hasattr(qwen3tts.model.talker, required):
+            raise RuntimeError(f"installed qwen-tts is incompatible: Talker has no {required}")
     config = AutoConfig.from_pretrained(args.init_model_path)
 
     lcfg = LoraConfig(
@@ -100,9 +106,21 @@ def train():
                 sub_ids = b["codec_ids"][b["codec_mask"]]
                 _, sub_loss = tk.forward_sub_talker_finetune(sub_ids, hs)
                 loss = out.loss + 0.3 * sub_loss
+                loss_is_finite = torch.isfinite(loss.detach()).all().to(dtype=torch.int32)
+                loss_is_finite = acc.reduce(loss_is_finite, reduction="min")
+                if not loss_is_finite.item():
+                    raise FloatingPointError(
+                        f"non-finite training loss at epoch {epoch}, step {step}: {loss.detach()}"
+                    )
                 acc.backward(loss)
                 if acc.sync_gradients:
-                    acc.clip_grad_norm_(model.parameters(), 1.0)
+                    grad_norm = acc.clip_grad_norm_(model.parameters(), 1.0)
+                    grad_is_finite = torch.isfinite(torch.as_tensor(grad_norm)).all().to(dtype=torch.int32)
+                    grad_is_finite = acc.reduce(grad_is_finite, reduction="min")
+                    if not grad_is_finite.item():
+                        raise FloatingPointError(
+                            f"non-finite gradient norm at epoch {epoch}, step {step}: {grad_norm}"
+                        )
                 opt.step(); opt.zero_grad()
             if step % 10 == 0:
                 acc.print(f"epoch {epoch} step {step} loss {loss.item():.4f}")

@@ -52,5 +52,5 @@ Write-Step "Starting the ROCm WSL workflow"
 $linuxRepo = (wsl.exe --distribution $Distro -- wslpath -a "$repoRoot").Replace([char]0, "").Trim()
 if (-not $linuxRepo) { throw "Could not translate the repository path into a WSL path." }
 
-wsl.exe --distribution $Distro --cd $linuxRepo -- bash training/expressivity-lora/docker/rocm-wsl.sh $Action
+wsl.exe --distribution $Distro --cd "$linuxRepo" -- bash training/expressivity-lora/docker/rocm-wsl.sh $Action
 if ($LASTEXITCODE -ne 0) { throw "ROCm WSL action '$Action' failed. Read the first ERROR line above for the fix." }

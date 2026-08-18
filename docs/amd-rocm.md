@@ -3,7 +3,7 @@
 > **Status: implementation complete, hardware validation pending.** Nothing in
 > this document is evidence of a successful R9700 build or run. The ROCm C backend,
 > PyTorch training, cloning, naming, and expression workflows still require the
-> hardware acceptance checklist in `rocm-change-review-2026-08-18.md`.
+> hardware acceptance checklist in [ROCm review handoff](rocm-review-handoff.md).
 
 This branch implements AMD GPU paths in two independent places:
 
@@ -20,11 +20,12 @@ It does not replace the repository's existing CUDA image or native build paths.
 
 ## Training setup
 
-Training requires Linux or a supported ROCm-on-WSL installation; the standard
-PyTorch ROCm wheels are not native Windows wheels. Install matching AMD builds
-of `torch` and `torchaudio` from the same PyTorch ROCm index. Do not mix a ROCm
-nightly `torch` with the generic PyPI `torchaudio` wheel. Then install the
-remaining dependencies:
+This repository's training workflow requires Linux or the supported ROCm-on-WSL
+container path. Native Windows PyTorch support is a separate AMD distribution and
+has not been validated with this trainer. Install matching AMD builds of `torch`
+and `torchaudio` from the same ROCm source. Do not mix a ROCm nightly `torch` with
+the generic PyPI `torchaudio` wheel. Then install the pinned model-facing
+dependencies:
 
 ```bash
 pip install -r training/expressivity-lora/requirements.txt
@@ -55,8 +56,9 @@ python training/expressivity-lora/train_lora.py \
   --train_jsonl data/train_with_codes.jsonl --output_dir out_lora
 ```
 
-`--mixed_precision bf16` is the default. The checker and trainer reject BF16 when
-the installed GPU/runtime does not report support. `fp16` and `no` are diagnostic
+`--mixed_precision bf16` is the default. The checker and guarded trainer run a
+real BF16 matrix multiply and backward pass, reject non-finite results, and abort
+training on a non-finite loss or gradient norm. `fp16` and `no` are diagnostic
 fallbacks and are not assumed to produce equivalent adapters.
 
 ## C inference on ROCm

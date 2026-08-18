@@ -14,9 +14,9 @@ inherited and are not replaced by the ROCm work.
 > audio-quality results. Do not treat inherited benchmarks below as ROCm results.
 
 This branch is synchronized through upstream commit `328ab9c` (upstream
-`v0.19.2-1-g328ab9c`, 2026-08-05). See the
-[upstream synchronization review](docs/upstream-sync-2026-08-18.md) for the
-merged feature groups, conflict resolution, and compatibility checks.
+`v0.19.2-1-g328ab9c`, 2026-08-05). See the current
+[ROCm review handoff](docs/rocm-review-handoff.md) for the merged feature groups,
+compatibility decisions, remaining risks, and hardware acceptance checklist.
 
 ## What This Fork Adds
 
@@ -69,8 +69,7 @@ operation.
 
 - [Windows/WSL2 Docker setup and commands](docs/rocm-wsl-docker.md)
 - [ROCm training and native C inference behavior](docs/amd-rocm.md)
-- [Independent code-review handoff and hardware acceptance checklist](docs/rocm-change-review-2026-08-18.md)
-- [Upstream synchronization review and ROCm compatibility notes](docs/upstream-sync-2026-08-18.md)
+- [Current ROCm review handoff and hardware acceptance checklist](docs/rocm-review-handoff.md)
 - [Copy-paste Claude review prompt](docs/claude-review-prompt.md)
 - [Voice cloning](docs/voice-cloning.md) and [custom voice formats](docs/custom-voices.md)
 
@@ -407,7 +406,7 @@ Italian-only emotion needs just `italian_csp_topk6.expr` (203 MB).
 **Deeper docs:** [docs/expressivity-assets.md](docs/expressivity-assets.md) (asset catalog + recipes) ·
 [docs/csp-ft-emotion.md](docs/csp-ft-emotion.md) (how the `.expr` packs were trained, cross-language transfer) ·
 [docs/expressivity-lora.md](docs/expressivity-lora.md) (which layers, the `.expr` format, train your own) ·
-[docs/paralinguistics-tags.md](docs/paralinguistics-tags.md) (laugh/sigh tags + vectors).
+[docs/markup.md](docs/markup.md) (laugh/sigh tags + vectors).
 
 ### Emotion & expressivity on the **small 0.6B** · 🆕
 
@@ -744,7 +743,7 @@ concurrent users in roughly the time of one by reading each weight once for all 
 |-------|----------|
 | [ROCm Docker on Windows/WSL2](docs/rocm-wsl-docker.md) | R9700 setup, doctor, build, inference, cloning, expression, and training commands |
 | [AMD ROCm backend](docs/amd-rocm.md) | HIP inference behavior, PyTorch training, fallback, architecture, and quantization limits |
-| [ROCm independent review](docs/rocm-change-review-2026-08-18.md) | Exact code changes, disputed assumptions, untested areas, and hardware acceptance checklist |
+| [ROCm independent review](docs/rocm-review-handoff.md) | Exact code changes, reviewed findings, untested areas, and hardware acceptance checklist |
 | [Voice Cloning](docs/voice-cloning.md) | Reference audio tips, ECAPA-TDNN internals, model comparison, samples |
 | [Custom Voices](docs/custom-voices.md) | `.qvoice` format, delta vs standard, managing profiles, troubleshooting |
 | [HTTP Server](docs/server.md) | All endpoints, request body, streaming, server performance |

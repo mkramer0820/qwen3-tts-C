@@ -43,9 +43,12 @@ The script performs these steps and stops at the first actionable failure:
 
 1. Confirms Windows reports an AMD Radeon AI PRO R9700.
 2. Installs `Ubuntu-24.04` if it is absent and ensures it uses WSL2.
-3. Checks `/dev/dxg`, then installs ROCm 7.2.1 and librocdxg 1.2.0 in Ubuntu.
+3. Checks `/dev/dxg`, verifies any installed ROCm/ROCDXG package versions, then
+   installs ROCm 7.2.1 with AMD's WSL use case and librocdxg 1.2.0 when absent.
+   Mismatched versions stop rather than being silently accepted.
 4. Installs and starts Docker Engine plus Compose inside Ubuntu.
-5. Builds the official ROCm 7.2.1/PyTorch 2.9.1 based image.
+5. SHA-256 verifies the two pinned installer packages and builds the official
+   ROCm 7.2.1/PyTorch 2.9.1 based image with exact model-facing Python versions.
 6. Selects the R9700 by device name when multiple AMD GPUs are present, then runs
    PyTorch ROCm/BF16 checks and reports the selected device's `gfx` target.
 
@@ -112,7 +115,8 @@ qwen-rocm train \
 ```
 
 The wrapper always adds `--require-rocm`, so training cannot silently run on CPU
-or a non-ROCm PyTorch build.
+or a non-ROCm PyTorch build. It verifies the pinned Qwen/Transformers/PEFT stack,
+runs a BF16 forward/backward probe, and aborts on non-finite training values.
 
 ## Hardware scope
 

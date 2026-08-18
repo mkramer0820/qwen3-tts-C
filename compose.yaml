@@ -30,8 +30,8 @@ services:
     profiles: [cuda]
     image: qwen-ft:latest
     build:
-      context: training/expressivity-lora/docker
-      dockerfile: Dockerfile
+      context: training/expressivity-lora
+      dockerfile: docker/Dockerfile
     working_dir: /workspace/qwen3-tts-C
     gpus: all
     ipc: host

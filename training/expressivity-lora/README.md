@@ -47,10 +47,17 @@ your dataset ─▶ prepare_manifest.py ─▶ <upstream prepare_data.py> ─▶
 
 ### 0. Install
 ```bash
-pip install torch torchaudio qwen-tts peft accelerate librosa soundfile safetensors lz4
+# Install the platform-appropriate torch/torchaudio pair first, then the pinned
+# model-facing dependency set used by this trainer.
+pip install -r requirements.txt
 # base model (CustomVoice 1.7B):
 huggingface-cli download Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --local-dir models/1.7B-CustomVoice
 ```
+
+The requirements intentionally pin `qwen-tts`, Transformers, Accelerate, and
+PEFT because the trainer uses internal Talker APIs and depends on causal-label
+shifting behavior. Do not upgrade one of those packages independently; update
+the set together and rerun `check_rocm.py` plus a short training smoke test.
 
 ### 1. Build a manifest from your dataset
 `prepare_manifest.py` turns a dataset of `(audio, transcript, emotion)` into 24 kHz-mono WAVs +

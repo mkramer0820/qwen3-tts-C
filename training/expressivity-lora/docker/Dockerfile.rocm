@@ -13,8 +13,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY training/expressivity-lora/requirements.txt /tmp/qwen-rocm-requirements.txt
+COPY training/expressivity-lora/rocm_validation.py /tmp/rocm_validation.py
 RUN python3 -m pip install --no-cache-dir -r /tmp/qwen-rocm-requirements.txt
-RUN python3 -c "import qwen_tts, torch; assert torch.version.hip, 'pip replaced the ROCm torch wheel'; assert torch.__version__.startswith('2.9.1'), torch.__version__; print('ROCm torch preserved:', torch.__version__, torch.version.hip)"
+RUN PYTHONPATH=/tmp python3 -c "from rocm_validation import check_training_packages; print('Training packages:', check_training_packages(require_rocm_stack=True))" \
+    && python3 -c "import torch, torchaudio; assert torch.version.hip, 'pip replaced the ROCm torch wheel'; assert torch.__version__.startswith('2.9.1'), torch.__version__; assert torchaudio.__version__.startswith('2.9.1'), torchaudio.__version__; print('ROCm torch preserved:', torch.__version__, torchaudio.__version__, torch.version.hip)"
 
 COPY training/expressivity-lora/docker/rocm-entrypoint.sh /usr/local/bin/qwen-rocm
 RUN sed -i 's/\r$//' /usr/local/bin/qwen-rocm && chmod 0755 /usr/local/bin/qwen-rocm
