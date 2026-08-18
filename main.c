@@ -969,6 +969,9 @@ int main(int argc, char **argv) {
     int voice_design = 0;
     const char *ref_audio = NULL;
     const char *ref_text_str = NULL;
+    const char *emo_ref = NULL;        /* --emo-ref: emotional style donor (codec anchor only) */
+    float emotion_strength = 0.25f;    /* --emotion-strength: 0.6B generic-direction dose (ear: 0.25-0.35) */
+    const char *emo_ref_text = NULL;   /* --emo-ref-text: its transcript */
     int xvector_only = 0;
     const char *save_voice = NULL;
     const char *load_voice = NULL;
@@ -1019,6 +1022,9 @@ int main(int argc, char **argv) {
         {"voice-design",  no_argument,       0, 1007},
         {"ref-audio",     required_argument, 0, 1008},
         {"ref-text",      required_argument, 0, 1009},
+        {"emo-ref",       required_argument, 0, 1600},
+        {"emotion-strength", required_argument, 0, 1602},
+        {"emo-ref-text",  required_argument, 0, 1601},
         {"xvector-only",  no_argument,       0, 1010},
         {"save-voice",    required_argument, 0, 1011},
         {"load-voice",    required_argument, 0, 1012},
@@ -1099,6 +1105,9 @@ int main(int argc, char **argv) {
             case 1007: voice_design = 1; break;
             case 1008: ref_audio = optarg; break;
             case 1009: ref_text_str = optarg; break;
+            case 1600: emo_ref = optarg; break;
+            case 1602: emotion_strength = (float)atof(optarg); break;
+            case 1601: emo_ref_text = optarg; break;
             case 1010: xvector_only = 1; break;
             case 1011: save_voice = optarg; break;
             case 1012: load_voice = optarg; break;
@@ -1189,6 +1198,11 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "  --max-ref-duration <secs>  Max ref audio for embedding (default: 30, 0=all)\n");
                 fprintf(stderr, "  --voice-strength <a>       .qvoice WDELTA scale (1=full voice; <1=more emotion, less fidelity)\n");
                 fprintf(stderr, "  --icl-frames <N>           Cap ICL ref frames (dilute prosody anchor; more emotion; 0=all)\n");
+                fprintf(stderr, "  --emotion-strength <s>     0.6B only: dose of the generic emotion direction on a cloned voice\n");
+                fprintf(stderr, "                             (default 0.25; 0.35 pushes harder). Ignored when a per-voice asset exists.\n");
+                fprintf(stderr, "  --emo-ref <path>           EMOTION BY EXAMPLE: copy the STYLE of an emotional reference WAV (24kHz mono),\n");
+                fprintf(stderr, "                             keeping the current voice (preset or clone). Works on 0.6B, where --emotion is a no-op.\n");
+                fprintf(stderr, "  --emo-ref-text <text>      Transcript of --emo-ref (required: the ICL prompt pairs text with codec frames)\n");
                 fprintf(stderr, "  --graft                    Ignore lite .qvoice ref_codes; clone via x-vector (emotive; use with --instruct)\n");
                 fprintf(stderr, "  --expr <file>              Apply a <lang>.expr expressivity weight delta on top (composable with any voice; 1.7B)\n");
                 fprintf(stderr, "  --expr-weight <m>          Dose a .expr (factored LoRA AND dense): 1=as trained, 0.6=subtler, 1.5=stronger\n");
@@ -1665,7 +1679,9 @@ int main(int argc, char **argv) {
         /* voice_class for para_pick: 2 = clone (--load-voice), 1 = vivian preset, 0 = ryan/other preset.
          * (clone-vs-preset matters for [yawn]: 哈啊 clone s42 / preset s7.) */
         int para_voice = load_voice ? 2 : ((speaker_name && !strcasecmp(speaker_name, "vivian")) ? 1 : 0);
-        para_sub_text = qwen_compose_para_substitute(text, para_voice, &did, &para_seed, &para_temp);
+        int para_small = ctx->config.hidden_size < 2048;   /* 0.6B has its own seed table */
+        para_sub_text = qwen_compose_para_substitute(text, para_voice, para_small,
+                                                     &did, &para_seed, &para_temp);
         if (para_sub_text && did) {
             text = para_sub_text;
             if (seed < 0) seed = para_seed;      /* pin the validated per-tag seed (laugh 7 / sigh 42) */
@@ -1767,6 +1783,97 @@ int main(int argc, char **argv) {
         }
         ctx->voice_design = 1;
     }
+    /* ── --emotion on the 0.6B: the emotion rides on the VOICE ──────────────────────────────
+     * The small model has no steerable emotion subspace (steer/expr/COMBINE all fail — see
+     * docs/emotion-06b-recipe.md), but it clones very well. So --emotion here resolves an
+     * emotional voice asset built once from emotional audio of that same voice, and loads it
+     * through the normal clone path. Presets and clones both work. */
+    static char emo06b_path[1024];
+    const char *emo06b_dir_tok = NULL;   /* set when we fall back to the generic direction */
+    if (emotion_spec && ctx->config.hidden_size < 2048 && !compose_spec) {
+        const char *tok = emotion_tok(emotion_spec);
+        if (!tok) {
+            fprintf(stderr, "Error: '%s' is not a known emotion\n", emotion_spec);
+            qwen_tts_unload(ctx); return 1;
+        }
+        char keybuf[128];
+        const char *key = emotion_voice_key(load_voice != NULL, load_voice, speaker_name,
+                                            keybuf, sizeof(keybuf));
+        if (!key) key = "ryan";                      /* default preset */
+        /* Search: next to an explicitly loaded voice first, then the shipped palette. */
+        char dirbuf[512] = "";
+        if (load_voice) {
+            const char *sl = strrchr(load_voice, '/');
+            if (sl && (size_t)(sl - load_voice) < sizeof(dirbuf))
+                snprintf(dirbuf, sizeof(dirbuf), "%.*s", (int)(sl - load_voice), load_voice);
+        }
+        const char *found = NULL; int found_is_bin = 0;
+        const char *dirs[2] = { dirbuf[0] ? dirbuf : NULL, "presets/emovoice" };
+        const char *exts[2] = { ".qvoice", ".bin" };   /* graft first: it holds anger together */
+        for (int d = 0; d < 2 && !found; d++) {
+            if (!dirs[d]) continue;
+            for (int e = 0; e < 2 && !found; e++) {
+                snprintf(emo06b_path, sizeof(emo06b_path), "%s/%s_%s%s", dirs[d], key, tok, exts[e]);
+                FILE *t = fopen(emo06b_path, "rb");
+                if (t) { fclose(t); found = emo06b_path; found_is_bin = (e == 1); }
+            }
+        }
+        if (!found) {
+            /* No dedicated asset. If a voice with an x-vector is loaded (a clone), shift it along
+             * the generic emotion direction instead — applied further down, once the embedding
+             * exists. That keeps `--emotion` working on ANY cloned voice with no extra models. */
+            char dprobe[512];
+            snprintf(dprobe, sizeof(dprobe), "presets/emovoice/dir_%s.bin", tok);
+            FILE *dp = fopen(dprobe, "rb");
+            if (dp && load_voice) {
+                fclose(dp);
+                emo06b_dir_tok = tok;               /* applied after the voice is loaded */
+            } else {
+                if (dp) fclose(dp);
+                fprintf(stderr, "Error: no '%s' voice asset for '%s' on the 0.6B.\n", tok, key);
+                fprintf(stderr, "  On the small model the emotion rides on the VOICE (docs/emotion-06b-recipe.md).\n");
+                if (!load_voice)
+                    fprintf(stderr, "  Presets need their own asset — build it once with:  make emovoice VOICE=%s\n", key);
+                fprintf(stderr, "  Or build this one cell by hand:\n");
+                fprintf(stderr, "    ./qwen_tts -d qwen3-tts-1.7b -s %s -l <LANG> --emotion %s \\\n", key, emotion_spec);
+                fprintf(stderr, "        --text \"<~25 s of text>\" -o donor.wav\n");
+                fprintf(stderr, "    ./qwen_tts -d qwen3-tts-0.6b-base --ref-audio donor.wav \\\n");
+                fprintf(stderr, "        --save-voice presets/emovoice/%s_%s.bin\n", key, tok);
+                qwen_tts_unload(ctx); return 1;
+            }
+        } else {
+            if (!silent)
+                fprintf(stderr, "Emotion '%s' on 0.6B: voice asset %s\n", tok, found);
+            load_voice = found;
+            if (found_is_bin) xvector_only = 1; else icl_only = 1;
+        }
+        emotion_spec = NULL;   /* consumed — do not fall through to the 1.7B steer router */
+    }
+
+    /* --emo-ref: EMOTION BY EXAMPLE. Independent of voice cloning — it only contributes the
+     * reference's codec frames as the ICL prosody anchor, so it composes with a preset speaker
+     * (-s ryan) on CustomVoice AND with a loaded clone. This is the emotion lever for the 0.6B,
+     * where --emotion is a no-op (no steerable emotion subspace); it works because the speech
+     * tokenizer is bit-identical across model sizes, so codec frames mean the same thing
+     * everywhere. See plan_06b_emo.md §E1. */
+    if (emo_ref) {
+        if (!emo_ref_text) {
+            fprintf(stderr, "Error: --emo-ref requires --emo-ref-text (the reference's transcript)\n");
+            fprintf(stderr, "  The ICL prompt pairs the reference TEXT with its codec frames.\n");
+            qwen_tts_unload(ctx);
+            return 1;
+        }
+        if (qwen_speech_encoder_load(ctx) != 0) {
+            fprintf(stderr, "Error: --emo-ref needs the speech encoder (speech_tokenizer/) and it failed to load\n");
+            qwen_tts_unload(ctx);
+            return 1;
+        }
+        ctx->emo_ref_path = strdup(emo_ref);
+        ctx->emo_ref_text = strdup(emo_ref_text);
+        if (!silent)
+            fprintf(stderr, "Emotion by example: style from %s (voice identity unchanged)\n", emo_ref);
+    }
+
     /* Voice cloning setup */
     if (ref_audio || load_voice) {
         if (!ctx->is_base_model && ref_audio) {
@@ -3000,6 +3107,41 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Streaming: chunk=%d frames (%.1fs), %s\n",
                     stream_chunk, stream_chunk / 12.5f,
                     do_stdout ? "raw PCM to stdout" : output);
+    }
+
+    /* ── 0.6B --emotion fallback: shift the loaded voice along a generic emotion DIRECTION ──
+     * The per-voice assets above are the high-quality route, but they need the 1.7B to render a
+     * donor. For a user's own cloned voice that is a hard requirement we do not want to impose,
+     * so: the emotional offset in ECAPA space turns out to be largely speaker-INDEPENDENT
+     * (cos 0.48-0.68 between two different speakers' deltas). We ship six unit directions,
+     * averaged over speakers, and add one to whatever x-vector is loaded. Zero extra models, zero
+     * generation — any cloned voice gets all six emotions instantly. Ear-validated 2026-08-05.
+     * The dedicated per-voice asset always wins when present. */
+    if (emo06b_dir_tok && ctx->speaker_embedding) {
+        char dpath[512];
+        snprintf(dpath, sizeof(dpath), "presets/emovoice/dir_%s.bin", emo06b_dir_tok);
+        FILE *df = fopen(dpath, "rb");
+        if (!df) {
+            fprintf(stderr, "Error: missing emotion direction '%s'\n", dpath);
+            qwen_tts_unload(ctx); return 1;
+        }
+        int h = ctx->speaker_enc.enc_dim > 0 ? ctx->speaker_enc.enc_dim : ctx->config.hidden_size;
+        float *d = (float *)malloc((size_t)h * sizeof(float));
+        if (!d || fread(d, sizeof(float), (size_t)h, df) != (size_t)h) {
+            fprintf(stderr, "Error: could not read '%s' (%d floats expected)\n", dpath, h);
+            free(d); fclose(df); qwen_tts_unload(ctx); return 1;
+        }
+        fclose(df);
+        float n0 = 0; for (int i = 0; i < h; i++) n0 += ctx->speaker_embedding[i] * ctx->speaker_embedding[i];
+        n0 = sqrtf(n0);
+        for (int i = 0; i < h; i++) ctx->speaker_embedding[i] += emotion_strength * n0 * d[i];
+        float n1 = 0; for (int i = 0; i < h; i++) n1 += ctx->speaker_embedding[i] * ctx->speaker_embedding[i];
+        n1 = sqrtf(n1);
+        if (n1 > 1e-6f) for (int i = 0; i < h; i++) ctx->speaker_embedding[i] *= n0 / n1;  /* keep the norm */
+        free(d);
+        if (!silent)
+            fprintf(stderr, "Emotion '%s' on 0.6B: generic direction @ %.2f (no per-voice asset needed)\n",
+                    emo06b_dir_tok, (double)emotion_strength);
     }
 
     /* Generate */

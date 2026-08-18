@@ -19,9 +19,17 @@ ifeq ($(UNAME_S),Darwin)
 else ifneq (,$(filter x86_64 amd64,$(UNAME_M)))
     ifeq ($(SIMD),scalar)
         ARCH_FLAGS =
+    else ifeq ($(SIMD),avx512bf16)
+        # AVX-512 + VNNI + BF16 (native int8 dot + native bf16 dot VDPBF16PS).
+        # Zen4/Zen5 (EPYC 9xx4/9xx5, Ryzen 7xxx+), Cooper Lake, Sapphire Rapids.
+        # Check `--caps` runtime line for avx512bf16 BEFORE using this build.
+        # -mavx512dq: _mm512_insertf32x8 (C7v4 scale-vec) is a DQ intrinsic — gcc
+        # enforces the always_inline target match (clang cross-compile does not;
+        # caught on the EPYC 2026-08-04). Every VNNI-era CPU has DQ.
+        ARCH_FLAGS = -mavx512f -mavx512bw -mavx512vl -mavx512dq -mavx512vnni -mavx512bf16 -mavx2 -mfma
     else ifeq ($(SIMD),avx512vnni)
         # AVX-512 + VNNI (native int8 dot). Cascade Lake+/Ice Lake/Zen4+ (e.g. Ryzen 9950X3D).
-        ARCH_FLAGS = -mavx512f -mavx512bw -mavx512vl -mavx512vnni -mavx2 -mfma
+        ARCH_FLAGS = -mavx512f -mavx512bw -mavx512vl -mavx512dq -mavx512vnni -mavx2 -mfma
     else ifeq ($(SIMD),avx512)
         ARCH_FLAGS = -mavx512f -mavx512bw -mavx512vl -mavx2 -mfma
     else
@@ -46,7 +54,7 @@ else
     LDLIBS += -lopenblas
 endif
 
-CFLAGS = $(CFLAGS_BASE) $(EXTRA_CFLAGS)
+CFLAGS = $(CFLAGS_BASE) -I$(INGOT_DIR)/include $(EXTRA_CFLAGS)
 
 # Source files
 SRCS = main.c \
@@ -64,7 +72,6 @@ SRCS = main.c \
        qwen_tts_compose.c \
        qwen_tts_sampling.c \
        qwen_tts_tokenizer.c \
-       qwen_tts_safetensors.c \
        qwen_tts_server.c \
        qwen_tts_voice_clone.c \
        qwen_tts_speech_encoder.c \
@@ -72,6 +79,20 @@ SRCS = main.c \
 
 OBJS = $(SRCS:.c=.o)
 TARGET = qwen_tts
+
+# ── ingot: the GGUF/safetensors library, vendored as a git subtree. Built by
+# its own Makefile so this one never learns how it is compiled. ──────────────
+INGOT_DIR := third_party/ingot
+INGOT_LIB := $(INGOT_DIR)/libingot.a
+$(INGOT_LIB):
+	$(MAKE) -C $(INGOT_DIR) lib
+
+# Refresh the vendored subtree from upstream (clean working tree required).
+update-ingot:
+	git subtree pull --prefix $(INGOT_DIR) https://github.com/mynah-org/ingot.git main --squash
+	@$(MAKE) -C $(INGOT_DIR) clean
+
+.PHONY: update-ingot
 MODEL_DIR = qwen3-tts-0.6b
 
 # Default: show help
@@ -113,8 +134,8 @@ help:
 	@echo "Example: make blas && ./$(TARGET) -d $(MODEL_DIR) -t \"Hello world\" -o output.wav"
 
 # Build
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
+$(TARGET): $(OBJS) $(INGOT_LIB)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(INGOT_LIB) $(LDLIBS)
 
 blas: $(TARGET)
 
@@ -155,8 +176,8 @@ rocm:
 	$(MAKE) clean
 	$(MAKE) rocm_build
 rocm_build: EXTRA_CFLAGS += -DQWEN_HAVE_ROCM -I$(ROCM_PATH)/include
-rocm_build: $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o
-	$(HIPCC) $(CFLAGS) $(ROCM_ARCH_FLAGS) -o $(TARGET) $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(LDLIBS) -lhipblas
+rocm_build: $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(INGOT_LIB)
+	$(HIPCC) $(CFLAGS) $(ROCM_ARCH_FLAGS) -o $(TARGET) $(OBJS) qwen_tts_backend.o qwen_tts_rocm.o $(INGOT_LIB) $(LDLIBS) -lhipblas
 	@echo "Built ./$(TARGET) with ROCm backend. Try: ./$(TARGET) --gpu-selftest --backend rocm"
 
 qwen_tts_rocm.o: qwen_tts_rocm.cpp qwen_tts_rocm.h
@@ -167,8 +188,8 @@ metal:
 	$(MAKE) clean
 	$(MAKE) metal_build
 metal_build: EXTRA_CFLAGS += -DQWEN_HAVE_METAL
-metal_build: $(OBJS) $(GPU_OBJS) qwen_tts_metal.o
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(GPU_OBJS) qwen_tts_metal.o $(LDLIBS) \
+metal_build: $(OBJS) $(GPU_OBJS) qwen_tts_metal.o $(INGOT_LIB)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(GPU_OBJS) qwen_tts_metal.o $(INGOT_LIB) $(LDLIBS) \
 		-framework Metal -framework Foundation
 	@echo ""
 	@echo "Built ./$(TARGET) with Metal backend. Try: ./$(TARGET) --gpu-selftest --backend metal"
@@ -203,8 +224,8 @@ cuda:
 	$(MAKE) clean
 	$(MAKE) cuda_build
 cuda_build: EXTRA_CFLAGS += -DQWEN_HAVE_CUDA -I$(CUDA_HOME)/include
-cuda_build: $(OBJS) $(GPU_OBJS) qwen_tts_cuda_kernels.o qwen_tts_cuda_talker.o qwen_tts_cuda_decoder.o
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(GPU_OBJS) qwen_tts_cuda_kernels.o qwen_tts_cuda_talker.o qwen_tts_cuda_decoder.o $(LDLIBS) \
+cuda_build: $(OBJS) $(GPU_OBJS) qwen_tts_cuda_kernels.o qwen_tts_cuda_talker.o qwen_tts_cuda_decoder.o $(INGOT_LIB)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS) $(GPU_OBJS) qwen_tts_cuda_kernels.o qwen_tts_cuda_talker.o qwen_tts_cuda_decoder.o $(INGOT_LIB) $(LDLIBS) \
 		-L$(CUDA_LIBDIR) -lcublas -lcudart -lstdc++
 	@# -lstdc++: the nvcc-compiled .cu object pulls in C++ ABI (__cxa_guard*/libstdc++);
 	@#          the final link is driven by gcc, which doesn't add it automatically.
@@ -273,7 +294,7 @@ clean:
 	rm -f test_decoder_standalone.o test_decoder_standalone.d qwen_tts_decoder_tool
 
 # Debug build
-debug: CFLAGS = $(CFLAGS_BASE) -g -O0 -DDEBUG -fsanitize=address -fsanitize=undefined
+debug: CFLAGS = $(CFLAGS_BASE) -I$(INGOT_DIR)/include -g -O0 -DDEBUG -fsanitize=address -fsanitize=undefined
 debug: LDLIBS += -fsanitize=address -fsanitize=undefined
 debug: clean $(TARGET)
 
@@ -544,6 +565,23 @@ emotion-demo: $(TARGET)
 emotion-para-demo: $(TARGET)
 	@bash tests/emotion_para_demo.sh
 
+# ── The SMALL model (0.6B) expressivity stack — emotion + para + clone, sub-realtime ──────────
+# On the 0.6B `--emotion` used to be a no-op: the model has no steerable emotion subspace. Since
+# 2026-08-05 the emotion rides on the VOICE instead (docs/emotion-06b-recipe.md) — you build one
+# 4 KB voice asset per emotion, once, and the small model gets the full expressive stack at RTF<1.
+#
+# make emovoice VOICE=ryan                                     # build the 6 assets for a preset
+# make emovoice VOICE=galatea LOAD=voices/galatea_graft.qvoice  # ... for a cloned voice
+# make emovoice VOICE=ryan GRAFT=voices/galatea_06b_graft.qvoice # ... + 16.8MB grafts (best for anger)
+#   (language: TTS_LANG=English — NOT LANG, which is the shell's own locale variable)
+emovoice: $(TARGET)
+	@bash tests/emovoice_build.sh
+
+# make emo-06b-demo — the showcase: 6 emotions + 5 [tag]s + both together + a clone, all on the
+# 0.6B under --int8, with the RTF printed for each. Needs `make emovoice VOICE=<v>` first.
+emo-06b-demo: $(TARGET)
+	@bash tests/emo_06b_demo.sh
+
 # make para-demo — shipped inline paralinguistic [tag]s on natural sentences (post 2026-07-08 gate:
 # wow/yawn/scoff + laugh/sigh, scoff s42, giggle standalone; phew parked). Prints afplay links.
 para-demo: $(TARGET)
@@ -623,11 +661,16 @@ ifeq ($(UNAME_M),arm64)
 	  && echo "  arm armv9-a +sme2        : OK (M4/M5)" || echo "  arm armv9-a +sme2        : (toolchain lacks SME2 — skipped)"
 	@# Cross-compile the x86 AVX-512-VNNI paths (incl. the C7 q4 VNNI matvec) from the ARM
 	@# Mac via clang -target, so x86 kernel breakage is caught here without a rented box.
-	@clang -target x86_64-apple-macos13 $(ISACHK) -march=x86-64-v3 -mavx512f -mavx512bw -mavx512vnni -mavx512bf16 \
+	@clang -target x86_64-apple-macos13 $(ISACHK) -march=x86-64-v3 -mavx512f -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 \
 	  -DUSE_BLAS qwen_tts_kernels.c 2>/dev/null \
 	  && echo "  x86 avx512 +vnni (x-comp) : OK (Zen4/5, Ice Lake+; C7 q4-VNNI)" || echo "  x86 avx512 +vnni (x-comp) : (clang cross lacks target — skipped)"
+	@# talker.c carries the AVX-512 bf16<->f32 bulk-conversion paths (avx512-parity) —
+	@# compile-check it for x86 too (needs the ingot include).
+	@clang -target x86_64-apple-macos13 $(ISACHK) -Ithird_party/ingot/include -march=x86-64-v3 \
+	  -mavx512f -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -DUSE_BLAS qwen_tts_talker.c 2>/dev/null \
+	  && echo "  x86 avx512 talker (x-comp): OK (bf16 conv paths)" || echo "  x86 avx512 talker (x-comp): (clang cross lacks target — skipped)"
 else
-	@$(CC) $(ISACHK) -march=x86-64-v3 -mavx512f -mavx512bw -mavx512vnni -mavx512bf16 qwen_tts_kernels.c \
+	@$(CC) $(ISACHK) -march=x86-64-v3 -mavx512f -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 qwen_tts_kernels.c \
 	  && echo "  x86 avx512 +vnni +bf16   : OK (Zen4/5, Ice Lake+)" || echo "  x86 avx512 +vnni +bf16   : FAIL"
 	@$(CC) $(ISACHK) -march=sapphirerapids qwen_tts_kernels.c 2>/dev/null \
 	  && echo "  x86 sapphirerapids (AMX) : OK" || echo "  x86 sapphirerapids (AMX) : (toolchain lacks AMX — skipped)"
@@ -1154,7 +1197,7 @@ demo-clone: $(TARGET)
 test-en: test-small-en
 test-it-ryan: test-small-it
 
-.PHONY: all help blas clean debug info serve cp-microbench batching-bench test-batch test-errors test-emotion test-emotion-ft emotion-demo emo-suite emotion-seeds test-compose test-caps test-selftest test-golden golden-update quant-ladder test-modes test-qvoice e2e \
+.PHONY: all help blas clean debug info serve cp-microbench batching-bench test-batch test-errors test-emotion test-emotion-ft emotion-demo emo-suite emotion-seeds test-compose test-caps test-selftest test-golden golden-update emovoice emo-06b-demo quant-ladder test-modes test-qvoice e2e \
         emotion-para-demo para-demo \
         test-serve test-serve-bench test-serve-repro test-serve-openai test-serve-parallel test-serve-concurrent test-serve-batch test-serve-continuous test-serve-stream-batch test-serve-all \
         test-clone test-voice-design \

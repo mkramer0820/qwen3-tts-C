@@ -9,7 +9,7 @@
 
 #include "qwen_tts.h"
 #include "qwen_tts_kernels.h"
-#include "qwen_tts_safetensors.h"
+#include "ingot/safetensors.h"
 #include "qwen_tts_batch.h"
 
 #include <stdio.h>
@@ -103,17 +103,22 @@ static inline uint16_t f32_to_bf16(float val) {
 }
 
 static uint16_t *get_bf16(void *ms, const char *name) {
-    safetensors_file_t *sf = NULL;
-    const safetensor_t *t = multi_safetensors_find((multi_safetensors_t *)ms, name, &sf);
-    if (!t || !sf) return NULL;
-    return safetensors_get_bf16_direct(sf, t);
+    const ingot_st_tensor *t = ingot_st_find((ingot_st *)ms, name);
+    if (!t || t->dtype != INGOT_DT_BF16) return NULL;
+    return (uint16_t *)(uintptr_t)ingot_st_data((ingot_st *)ms, t);
 }
 
+/* Same signature and same ownership as the old safetensors_get_f32: the
+ * caller frees. ingot converts into a buffer that is ours from the start. */
 static float *get_f32(void *ms, const char *name) {
-    safetensors_file_t *sf = NULL;
-    const safetensor_t *t = multi_safetensors_find((multi_safetensors_t *)ms, name, &sf);
-    if (!t || !sf) return NULL;
-    return safetensors_get_f32(sf, t);
+    const ingot_st_tensor *t = ingot_st_find((ingot_st *)ms, name);
+    if (!t) return NULL;
+    float *out = malloc((size_t)t->nelem * sizeof(float));
+    if (!out || ingot_st_to_f32((ingot_st *)ms, t, out) != 0) {
+        free(out);
+        return NULL;
+    }
+    return out;
 }
 
 /* Convert f32 vector to bf16 (NEON-vectorized) */
@@ -127,6 +132,15 @@ static void f32_to_bf16_vec(uint16_t *dst, const float *src, int64_t n) {
         uint16x4_t lo = vshrn_n_u32(u0, 16);
         uint16x4_t hi = vshrn_n_u32(u1, 16);
         vst1q_u16(dst + i, vcombine_u16(lo, hi));
+    }
+    for (; i < n; i++) dst[i] = f32_to_bf16(src[i]);
+#elif defined(__AVX512F__)
+    int64_t i = 0;
+    for (; i + 15 < n; i += 16) {
+        /* Truncate 16 f32 to their top 16 bits (bf16, same semantics as the
+         * AVX2/NEON paths), narrow 16×u32 -> 16×u16 with vpmovdw. */
+        __m512i u = _mm512_srli_epi32(_mm512_castps_si512(_mm512_loadu_ps(src + i)), 16);
+        _mm256_storeu_si256((__m256i *)(dst + i), _mm512_cvtepi32_epi16(u));
     }
     for (; i < n; i++) dst[i] = f32_to_bf16(src[i]);
 #elif defined(__AVX2__)
@@ -154,6 +168,14 @@ static void bf16_to_f32_matrix(float *dst, const uint16_t *src, int64_t n) {
         uint32x4_t hi = vshll_n_u16(vget_high_u16(v), 16);
         vst1q_f32(dst + i,     vreinterpretq_f32_u32(lo));
         vst1q_f32(dst + i + 4, vreinterpretq_f32_u32(hi));
+    }
+    for (; i < n; i++) dst[i] = bf16_to_f32(src[i]);
+#elif defined(__AVX512F__)
+    int64_t i = 0;
+    for (; i + 15 < n; i += 16) {
+        __m256i v = _mm256_loadu_si256((const __m256i *)(src + i));
+        __m512i w = _mm512_slli_epi32(_mm512_cvtepu16_epi32(v), 16);
+        _mm512_storeu_ps(dst + i, _mm512_castsi512_ps(w));
     }
     for (; i < n; i++) dst[i] = bf16_to_f32(src[i]);
 #elif defined(__AVX2__)
@@ -503,11 +525,13 @@ void *g_cuda_talker_batch_state = NULL;
 void *g_metal_talker_state = NULL;
 void *g_metal_talker_batch_state = NULL;   /* batched fused Talker step (server throughput) */
 extern void qwen_metal_talker_step(void *state, const float *embed, float *hidden_out, int pos);
+extern void qwen_metal_talker_get_dec_x(void *state, float *out);
 extern void qwen_metal_talker_batch_step(void *state, const float *embeds, const int *pos_arr, float *hidden_out);
 #endif
 #ifdef QWEN_HAVE_CUDA
 extern void qwen_cuda_talker_batch_step(void *state, const float *embeds, const int *pos_arr, float *hidden_out);
 extern void qwen_cuda_talker_step(void *state, const float *embed, float *hidden_out, int pos);
+extern void qwen_cuda_talker_get_dec_x(void *state, float *out);
 #endif
 
 int qwen_talker_step(qwen_tts_ctx_t *ctx, float *embed, float *hidden_out) {
@@ -519,18 +543,29 @@ int qwen_talker_step(qwen_tts_ctx_t *ctx, float *embed, float *hidden_out) {
     int pos = ctx->kv_len;
     float eps = c->rms_norm_eps;
 
+    /* Fused-vs-CPU dispatch is per-REQUEST (ml_steer_weight), not per-frame (w_eff):
+     * mixing fused steps (device KV only) and CPU steered steps (host KV only) inside one
+     * request leaves each cache missing the other side's rows — a pulse schedule
+     * (--ml-frames N) would read garbage after the pulse. A steered request runs fully on
+     * the CPU path (the fused step doesn't apply ml_steer yet); qwen_tts_generate forces a
+     * full prefill for it so the host KV is coherent (issue #19 part 2). */
 #ifdef QWEN_HAVE_CUDA
     if (g_cuda_talker_state && ctx == g_gpu_fused_owner &&
-        !(ctx->ml_steer && ctx->ml_steer_w_eff != 0.0f)) {
+        !(ctx->ml_steer && ctx->ml_steer_weight != 0.0f)) {
         qwen_cuda_talker_step(g_cuda_talker_state, embed, hidden_out, pos);
+        /* The fused step skips the host state; refresh ctx->dec_x from the device residual
+         * so the prefill→decode handoff (last_hidden = rms_norm(dec_x, talker_norm)) stays
+         * correct across server delta-reuse requests and streaming chunk seeds (issue #19). */
+        qwen_cuda_talker_get_dec_x(g_cuda_talker_state, ctx->dec_x);
         ctx->kv_len = pos + 1;
         return 0;
     }
 #endif
 #ifdef QWEN_HAVE_METAL
     if (g_metal_talker_state && ctx == g_gpu_fused_owner &&
-        !(ctx->ml_steer && ctx->ml_steer_w_eff != 0.0f)) {
+        !(ctx->ml_steer && ctx->ml_steer_weight != 0.0f)) {
         qwen_metal_talker_step(g_metal_talker_state, embed, hidden_out, pos);
+        qwen_metal_talker_get_dec_x(g_metal_talker_state, ctx->dec_x);
         ctx->kv_len = pos + 1;
         return 0;
     }

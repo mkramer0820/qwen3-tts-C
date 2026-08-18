@@ -14,6 +14,19 @@ adapters, HTTP emotion behavior, numerical parity, fallback behavior, and audibl
 output all remain unverified on hardware. The acceptance checklist at the end is
 required before describing this branch as working or production-ready.
 
+## Upstream synchronization included in this review
+
+The branch now merges 34 commits from `gabriele-mastrapasqua/qwen3-tts:main`
+through commit `328ab9c` (`v0.19.2-1-g328ab9c`). The merge brings in the Ingot
+safetensors/GGUF library migration, the fused GPU Talker server replay fix,
+AVX-512 parity work, CI action updates, and the complete 0.6B emotion asset set.
+
+The merge exposed one ROCm-specific build issue: upstream added `libingot.a` to
+the CPU, Metal, and CUDA link commands, but the fork's ROCm target did not exist
+upstream and therefore was not updated. `rocm_build` now depends on and links
+`$(INGOT_LIB)`. The README was the only textual merge conflict. Full details and
+independent review points are in `docs/upstream-sync-2026-08-18.md`.
+
 ## Problems addressed
 
 1. A requested GPU backend could fall back to CPU, after which `--gpu-selftest`
@@ -141,6 +154,8 @@ Claude should independently inspect and either confirm or dispute each item:
    and the documented INT4/quant-mixed restriction.
 9. Global repository compatibility: CUDA image/profile remains functional, native
    CPU/CUDA/Metal builds are unaffected, and no AMD default leaks into other users.
+   Confirm that every native target, including ROCm, links the vendored Ingot
+   library after removal of the legacy safetensors reader.
 10. Usability from a clean Windows 11 host that initially lists only
     `docker-desktop`: every failure should state the next corrective action.
 11. Populate the README and `docs/amd-rocm.md` R9700 performance tables with raw

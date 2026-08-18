@@ -13,6 +13,11 @@ inherited and are not replaced by the ROCm work.
 > or run on the R9700 yet. There are no R9700 performance, training, cloning, or
 > audio-quality results. Do not treat inherited benchmarks below as ROCm results.
 
+This branch is synchronized through upstream commit `328ab9c` (upstream
+`v0.19.2-1-g328ab9c`, 2026-08-05). See the
+[upstream synchronization review](docs/upstream-sync-2026-08-18.md) for the
+merged feature groups, conflict resolution, and compatibility checks.
+
 ## What This Fork Adds
 
 - A HIP/hipBLAS C inference backend selected with `--backend rocm`.
@@ -65,6 +70,7 @@ operation.
 - [Windows/WSL2 Docker setup and commands](docs/rocm-wsl-docker.md)
 - [ROCm training and native C inference behavior](docs/amd-rocm.md)
 - [Independent code-review handoff and hardware acceptance checklist](docs/rocm-change-review-2026-08-18.md)
+- [Upstream synchronization review and ROCm compatibility notes](docs/upstream-sync-2026-08-18.md)
 - [Voice cloning](docs/voice-cloning.md) and [custom voice formats](docs/custom-voices.md)
 
 ## Inherited Engine Overview
@@ -122,8 +128,8 @@ The capabilities below come from the existing engine. ROCm compatibility is
 implemented in this fork but remains subject to the validation matrix above.
 
 - **Pure C, minimal dependencies** — Only requires a C compiler and BLAS. No Python runtime needed.
-- **Runs on macOS, Linux and Windows/WSL2 (ARM/x86)** — the hot matvec/attention kernels have **NEON+SDOT (ARM), AVX2 and AVX-512/VNNI (x86)** twins with a scalar fallback + runtime ISA guard, and decode threading runs on a **cross-OS pool** (GCD on macOS, pthread elsewhere). Validated on Apple M1, Ryzen 7 6800H, and EPYC 9555P (Zen5). Single-stream RTF is memory/cache-bound, so the chip's cache matters most (see [Performance](#performance)); measure yours with `bash tests/x86_bench.sh`.
-- **Optional GPU backends (opt-in)** — **Apple Metal** (`make metal`) and **NVIDIA CUDA** (`make cuda`) provide fused resident pipelines; the experimental, not-yet-hardware-validated **AMD ROCm/HIP** path (`make rocm`) provides correctness-first bf16 matrix offload. CPU stays the default. → [Performance § GPU backends](#performance) · [AMD ROCm](docs/amd-rocm.md) · [Metal](docs/hardware-testing.md) · [CUDA](docs/cuda-performance.md).
+- **Runs on macOS, Linux and Windows/WSL2 (ARM/x86)** — the hot matvec/attention kernels have **NEON+SDOT (ARM), AVX2 and AVX-512/VNNI/BF16 (x86)** twins with a scalar fallback + runtime ISA guard, and decode threading runs on a **cross-OS pool** (GCD on macOS, pthread elsewhere). Validated on Apple M1, Ryzen 7 6800H, and EPYC 9555P (Zen5). Single-stream RTF is memory/cache-bound, so the chip's cache matters most (see [Performance](#performance)); measure yours with `bash tests/x86_bench.sh`.
+- **Optional GPU backends (opt-in)** — **Apple Metal** (`make metal`) and **NVIDIA CUDA** (`make cuda`) run the whole fused pipeline resident on the GPU (inherited measurements: **0.28 RTF** for 0.6B on an M4; ~0.44 for 1.7B on a mainstream NVIDIA GPU), plus server request-batching for throughput. The experimental, not-yet-hardware-validated **AMD ROCm/HIP** path (`make rocm`) provides correctness-first BF16 matrix offload with CPU fallback for remaining operations. CPU stays the default. → [Performance § GPU backends](#performance) · [AMD ROCm](docs/amd-rocm.md) · [Metal](docs/hardware-testing.md) · [CUDA](docs/cuda-performance.md).
 - **Both model sizes** — Automatically detects 0.6B or 1.7B from weight files.
 - **9 preset voices** — `ryan`, `vivian`, `serena`, `aiden`, `eric`, `dylan`, `uncle_fu`, `ono_anna`, `sohee`.
 - **10 languages** — English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian.
@@ -132,6 +138,7 @@ implemented in this fork but remains subject to the validation matrix above.
 - **Voice management** — List, inspect, delete `.qvoice` profiles (`--list-voices`, `--delete-voice`). No model required.
 - **Style control** — `--instruct` for emotion/style on 1.7B: angry, whisper, cheerful, and more.
 - **Emotion in one flag** (🧪 **beta**; paralinguistics `[laugh]`/`[sigh]` 🧪 **alpha**) — `--emotion <sad\|joy\|anger\|fear\|disgust\|surprise>` (1.7B) auto-applies the ear-validated recipe (per-language fine-tune `.expr` + steering vector + a default English instruct + temperature), on presets **and** cloned voices, in every Qwen language. **Plus 7 blended "dyads"** (`contempt`, `awe`, `nostalgia`, `disapproval`, `remorse`, `outrage`, `despair`) and **inline `[emotion]` switching** — many emotions from one prompt in a single generation. A vivid English `--instruct` and `-T` override. Pitch-preserving `--rate`/`--volume` and a `--roughness` grit knob are still available. See [docs/emotion-THE-recipe.md](docs/emotion-THE-recipe.md).
+- **The small 0.6B is expressive too — and stays sub-realtime** 🆕 — for a long time `--emotion` did nothing on the 0.6B: unlike the 1.7B it has no steerable emotion subspace. It does, however, clone voices very well — so on the small model **the emotion rides on the voice**. **All 9 presets ship ready** (240 KB of 4 KB voice assets) and **any cloned voice emotes with zero setup** via six shipped emotion directions — so the small model has the whole expressive stack out of the box: **6 emotions + inline `[tag]` paralinguistics + voice cloning, together, at RTF ≈ 0.8** under `--int8` on an M1. Try it with **`make emo-06b-demo`**. See [docs/emotion-06b-recipe.md](docs/emotion-06b-recipe.md).
 - **Inline markup for audiobooks** — write one text with ElevenLabs/Bark-style tags and get a multi-emotion take in one pass: `--text "I won! [joy] ...amazing! [pause:500ms] [sad] But it's over. [sigh]"`. Mid-text emotion switches, `[pause:400ms]`/`[break:1s]` pauses, and `[sigh]`/`[huff]` paralinguistic fillers — auto-detected in `--text` (no flag) or explicit via `--compose`. Spans are model-generated and concatenated seamlessly. See [docs/markup.md](docs/markup.md).
 - **VoiceDesign** — Create new voices from text descriptions.
 - **HTTP server** — `/v1/tts`, `/v1/tts/stream`, OpenAI-compatible `/v1/audio/speech`; JSON body takes `emotion`/`instruct`/`volume`/`rate`. **Inline `[mood]` markup works over the API too** — one request can switch emotion sentence-by-sentence (`"text":"[joy] Great news! [sad] But I must go."`), auto-detected and streamed span-by-span. Cloned voices need a startup `--expr` for CLI-equivalent COMBINE emotion. See [docs/server.md](docs/server.md).
@@ -401,6 +408,82 @@ Italian-only emotion needs just `italian_csp_topk6.expr` (203 MB).
 [docs/expressivity-lora.md](docs/expressivity-lora.md) (which layers, the `.expr` format, train your own) ·
 [docs/paralinguistics-tags.md](docs/paralinguistics-tags.md) (laugh/sigh tags + vectors).
 
+### Emotion & expressivity on the **small 0.6B** · 🆕
+
+The 0.6B used to be the fast *neutral* voice: `--emotion` was a no-op there, and steering or
+fine-tuning it never worked. The reason is structural — at half the width the small model has no
+emotion subspace disjoint from language and timbre, so there is nothing to steer.
+
+But it **clones voices very well**. So on the small model the emotion is not an inference-time lever,
+it is a **property of the voice**: you clone from emotional audio and get an emotional voice.
+
+**A cloned voice gets all six emotions for free.** Clone a voice the usual way and `--emotion` just
+works on it — no asset to build, no 1.7B, no Base model:
+
+```bash
+./qwen_tts -d qwen3-tts-0.6b --load-voice myvoice.qvoice --icl-only --int8 \
+    -l Italian --emotion anger --text "[sigh] ..." -o out.wav
+# → Emotion 'ang' on 0.6B: generic direction @ 0.25 (no per-voice asset needed)
+```
+
+This works because the emotional offset in ECAPA speaker space turns out to be largely
+**speaker-independent** — between two different speakers' deltas the cosine sits at 0.48-0.68 (random
+1024-dim vectors would be ~0). Six averaged unit directions ship in this repo (4 KB each, 24 KB total)
+and the engine adds one to whatever x-vector you loaded, preserving its norm. It costs nothing at
+runtime. Dose it with `--emotion-strength` (default 0.25; 0.35 pushes harder).
+
+**All 9 presets work out of the box** too — every one ships with its six dedicated assets (60 files,
+240 KB total), each built from a donor in the language that voice speaks natively. So `--emotion` on
+a preset needs no setup either:
+
+```bash
+# emotion on the SMALL model — nothing to install, the 1.7B is not in the path
+./qwen_tts -d qwen3-tts-0.6b -s ryan -l Italian --int8 --emotion anger \
+    --text "Non è possibile che succeda sempre la stessa cosa." -o anger.wav
+
+# everything composes — emotion + inline paralinguistics, one generation
+./qwen_tts -d qwen3-tts-0.6b -s ryan -l Italian --int8 --emotion sad \
+    --text "[sigh] Non è possibile che succeda sempre la stessa cosa." -o sad_sigh.wav
+```
+
+**Optional upgrade — a dedicated asset per (voice × emotion).** The generic direction is instant and
+needs nothing; a *dedicated* asset, rendered from ~25 s of that voice actually performing the emotion,
+is stronger and more faithful. One command builds all six and caches them — you never map anything
+by hand:
+
+```bash
+make emovoice VOICE=vivian                                      # another preset
+make emovoice VOICE=galatea LOAD=voices/galatea_graft.qvoice    # your own cloned voice
+make emovoice VOICE=ryan TTS_LANG=English                       # another language
+```
+
+This route needs the 1.7B and the 0.6B Base model present (the first renders the emotional donor
+audio, the second extracts the 4 KB voice), one-time and offline. **It is an upgrade, not a
+prerequisite** — without it a cloned voice still emotes via the generic direction. When a dedicated
+asset exists the engine prefers it automatically.
+
+**Resolution order** for `--emotion` on the 0.6B: dedicated asset → generic direction on the loaded
+x-vector → an explicit error naming the missing piece. It never silently falls back to neutral.
+
+🎧 **`make emo-06b-demo`** renders the whole stack (6 emotions + 5 `[tag]`s + both together + a clone)
+and prints the RTF of each.
+
+**Speed** — M1, `-j4`, quiet machine. The full expressive stack costs ~0.09 RTF over the bare model:
+
+| on the 0.6B | bf16 | **int8** | int4 |
+|---|---|---|---|
+| emotional voice (4 KB) | 1.16 | **0.73** | **0.56** |
+| emotional voice (16.8 MB graft) | 1.14 | **0.72** | — |
+| **emotional voice + `[tag]`** | 1.18 | **0.78** | — |
+| bare 0.6B (reference) | 1.17 | 0.69 | — |
+
+**Notes.** Works on presets *and* cloned voices. Prefer the 16.8 MB graft for **anger** — with a bare
+4 KB x-vector the high-arousal delivery compresses and can swallow a short word; the graft's prosody
+scaffolding holds it together, at the same speed. The `[tag]` seeds differ from the 1.7B's (the engine
+picks the right table per model automatically).
+
+→ Full recipe, limits and what was tried and rejected: [docs/emotion-06b-recipe.md](docs/emotion-06b-recipe.md)
+
 ### HTTP Server
 
 ```bash
@@ -516,6 +599,17 @@ cache-rich SLC; int8 is the safest quality/speed pick — **both beat real time*
 | **HTTP server** (`--serve`, warm) | ~1.3 | **0.88** ⚡ | — |
 | **Custom voice** `.qvoice` (streamed) | 1.34 | **0.93** ⚡ | 0.47 s |
 
+**Expressive *and* sub-realtime** — the 0.6B's full expressive stack (emotional voice + inline `[tag]`
+paralinguistics + cloning, see [Emotion on the small 0.6B](#emotion--expressivity-on-the-small-06b--)) costs
+only **~0.09 RTF** over the bare model:
+
+| 0.6B, everything on | bf16 | **`--int8`** | `--int4` |
+|---|---|---|---|
+| emotional voice (4 KB asset) | 1.16 | **0.73** ⚡ | **0.56** ⚡ |
+| emotional voice (16.8 MB graft) | 1.14 | **0.72** ⚡ | — |
+| **emotional voice + `[tag]`** | 1.18 | **0.78** ⚡ | — |
+| bare 0.6B (reference) | 1.17 | 0.69 | — |
+
 RTF = processing_time / audio_duration; **< 1.0 = faster than real-time**. Quantization reads fewer weight bytes
 per frame (native SDOT on ARM, AVX-512/VNNI on x86): **0.6B ~1.5 (bf16) → 0.69 (int8) → 0.52 (int4)**; **1.7B
 ~2.0 (bf16) → 1.79 (int8) → ~1.53 (quant-mixed: int4 Talker + int8 CP, the fastest 1.7B config on M1)** — no
@@ -550,18 +644,19 @@ The full cross-hardware workflow (which boxes have which SIMD, where to rent, wh
 | **Graviton3** (Neoverse-V1, AWS c7g.2xlarge) | NEON + SDOT + **i8mm SMMLA + BFMMLA**, pthread 4-thread | 16 GB / 8 vCPU | **0.66** (1.7B int8: **0.95**, sub-RT!) | `--int8 -j4` |
 | **Apple M4** (Mac mini, Scaleway) | NEON + SDOT + i8mm + bf16 + SME | 16 GB / 10-core | **0.32** (1.7B qm: **0.57**!) | `--int4 -j4` |
 | **Ryzen 7 6800H** (Zen3+, 16 MB L3, bare metal) | AVX2 + FMA, pthread 4-thread | 32 GB | **2.02** | `--int4 -j4` |
-| **EPYC 9555P** (Zen5, AVX-512+VNNI, Scaleway VM) | AVX-512-VNNI, pthread 4-thread | 16 GB / 4 vCPU | **0.95** | `--int8 -j4` |
+| **EPYC 9555P** (Zen5, AVX-512+VNNI+BF16, Scaleway VM) | AVX-512 attention + VNNI + VDPBF16PS, pthread 4-thread | 16 GB / 4 vCPU | **0.95** (int4 = int8; -j1: int4 **1.05** beats int8 1.21) | `--int4 -j4`, `SIMD=avx512bf16` |
 
-Numbers refreshed 2026-07-10 after the PR#17 decoder work (exact streaming conv + threaded snake + BLAS
-phase-lever + optional int8 decoder conv). Single-stream RTF is **memory/cache-bound** (the Code Predictor
-re-reads its weights 16×/frame): SIMD width and thread count matter less than fewer weight bytes
-(`--int8`/`--int4`) and a cache that fits the working set (Apple's SLC, an X3D chip's V-cache). On
-cache-rich Apple Silicon **int4 is the fastest lever**; on x86 **int8+VNNI wins the wall clock** (int4 and
-int8 fork the greedy trajectory, so compare kernel ms/frame, not wall RTF — there the q4-VNNI v3
-throughput kernel now edges int8). This holds for 1.7B too: on x86 pure `--int8` beats `--quant-mixed`
-(quant-mixed is the Apple-silicon config). Many-core servers are best for **throughput** (concurrent
-requests), not single-stream latency. Check yours: `./qwen_tts --caps` (on x86, build with
-`make blas SIMD=avx512vnni` to enable the VNNI kernels — the default build is portable AVX2).
+Numbers refreshed 2026-08-04 after the AVX-512 parity round (16-wide attention/rms/conversions,
+native-bf16 `VDPBF16PS` matvec, q4-VNNI v3-default + fused-QKV VNNI twin — bf16 mode −21% single-thread
+on Zen5, and **int4 now beats int8 single-thread on x86 0.6B** for the first time). Single-stream RTF is
+**memory/cache-bound** (the Code Predictor re-reads its weights 16×/frame): SIMD width and thread count
+matter less than fewer weight bytes (`--int8`/`--int4`) and a cache that fits the working set (Apple's
+SLC, an X3D chip's V-cache). On cache-rich Apple Silicon **int4 is the fastest lever**; on x86 it now
+depends on the model: **0.6B → `--int4`**, **1.7B → `--int8`** (still the 1.7B wall-clock king; pure
+`--int8` beats `--quant-mixed`, which is the Apple-silicon config). Many-core servers are best for
+**throughput** (concurrent requests), not single-stream latency. Check yours: `./qwen_tts --caps` (on
+x86, build with `make blas SIMD=avx512bf16` on Zen4/5 / Cooper Lake+, or `SIMD=avx512vnni` if the CPU
+lacks `avx512bf16` — the default build is portable AVX2).
 
 **Concurrent serving — request batching (`--serve --batch-size N`).** For *N users at once*, the server
 can step their requests **together** through the model (vLLM-style): weights are read from memory **once**
@@ -655,6 +750,7 @@ concurrent users in roughly the time of one by reading each weight once for all 
 | [Server request-batching](docs/server-batching.md) | vLLM-style `--batch-size N`: serve N concurrent users together, continuous batching, per-request streaming |
 | [VoiceDesign](docs/voice-design.md) | Creating voices from text descriptions |
 | [Emotion — THE recipe](docs/emotion-THE-recipe.md) | The one-and-only `--emotion` recipe: preset → STEER @ w12, clone → COMBINE; native preset per language. Single source of truth |
+| [Emotion on the small 0.6B](docs/emotion-06b-recipe.md) | 🆕 The small model has no steerable emotion subspace — so the emotion rides on the **voice** (4 KB asset per emotion, `make emovoice`). Emotion + paralinguistics + cloning at RTF ≈ 0.8 |
 | [Expressivity packs `.expr`](docs/expressivity-lora.md) | Per-language emotion LoRA: which layers, why it's ~16–63 MB, file format, `--expr`/`--expr-weight`, per-voice rank. Train your own: [`training/expressivity-lora/`](training/expressivity-lora/) |
 | [Inline markup](docs/markup.md) | Audiobook/podcast tags in `--text`: `[sad]`/`[joy]` mid-text emotion switches, `[sigh]`/`[huff]` fillers, `[pause:400ms]` |
 | [Quantization](docs/quantization.md) | INT8/INT4, comparison table, recommendations |
@@ -670,6 +766,7 @@ concurrent users in roughly the time of one by reading each weight once for all 
 | [Voice Cloning Internals](blog/voice-cloning-internals.md) | ECAPA-TDNN architecture deep-dive |
 | [Cross-Model Voice Analysis](blog/cross-model-voice-analysis.md) | Why delta format works (weight analysis) |
 | [Optimization Notes](blog/optimization-notes.md) | RTF 3.5 → 1.3: the full M1 bf16 optimization story |
+| [Emotion on the Small Model](blog/emotion-on-the-small-model.md) | Why steering and fine-tuning both failed on the 0.6B, the cosine≈0 measurement that killed transfer, and the reframe that solved it: emotion as a property of the voice |
 | [Fast on Every CPU](blog/making-qwen3-tts-fast-on-every-cpu.md) | SDOT (sub-1.0 on M1) + AVX2/AVX-512/VNNI on x86; why it's memory-bound |
 
 ## Credits & Acknowledgments

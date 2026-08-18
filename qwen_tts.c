@@ -6,7 +6,7 @@
 #include "qwen_tts.h"
 #include "qwen_tts_voice_clone.h"
 #include "qwen_tts_kernels.h"
-#include "qwen_tts_safetensors.h"
+#include "ingot/safetensors.h"
 #include "qwen_tts_tokenizer.h"
 #include "qwen_tts_audio.h"
 #include "qwen_tts_batch.h"
@@ -629,28 +629,33 @@ qwen_tts_ctx_t *qwen_tts_load_ex(const char *model_dir, int silent, int use_int8
         }
     }
 
-    /* Load safetensors using qwen-asr loader (mmap-based, working) */
-    ctx->safetensors = multi_safetensors_open(ctx->model_dir);
-    if (!ctx->safetensors) {
-        fprintf(stderr, "Error: Failed to load model from %s\n", ctx->model_dir);
+    /* Load safetensors through ingot (mmap, index.json-aware, no caps) */
+    char st_err[256] = "";
+    ingot_st *st_main = NULL;
+    if (ingot_st_open_dir(&st_main, ctx->model_dir, st_err, sizeof st_err) != 0) {
+        fprintf(stderr, "Error: Failed to load model from %s: %s\n",
+                ctx->model_dir, st_err);
         free(ctx); return NULL;
     }
+    ctx->safetensors = st_main;
     /* Speech tokenizer is in a separate subdirectory */
     char speech_dir[4096];
     snprintf(speech_dir, sizeof(speech_dir), "%s/speech_tokenizer", ctx->model_dir);
-    ctx->speech_safetensors = multi_safetensors_open(speech_dir);
-    if (!ctx->speech_safetensors) {
-        fprintf(stderr, "Error: Failed to load speech tokenizer from %s\n", speech_dir);
-        multi_safetensors_close(ctx->safetensors);
+    ingot_st *st_speech = NULL;
+    if (ingot_st_open_dir(&st_speech, speech_dir, st_err, sizeof st_err) != 0) {
+        fprintf(stderr, "Error: Failed to load speech tokenizer from %s: %s\n",
+                speech_dir, st_err);
+        ingot_st_close(ctx->safetensors);
         free(ctx); return NULL;
     }
+    ctx->speech_safetensors = st_speech;
 
     if (!ctx->silent) fprintf(stderr, "Threads: %d\n", qwen_get_threads());
 
     double t0 = time_ms();
     if (qwen_talker_load(ctx) != 0 || qwen_cp_load(ctx) != 0 || qwen_speech_decoder_load(ctx) != 0) {
-        multi_safetensors_close(ctx->safetensors);
-        multi_safetensors_close(ctx->speech_safetensors);
+        ingot_st_close(ctx->safetensors);
+        ingot_st_close(ctx->speech_safetensors);
         free(ctx); return NULL;
     }
 
@@ -725,12 +730,14 @@ void qwen_tts_unload(qwen_tts_ctx_t *ctx) {
     free(ctx->speech_dec.pre_layers);
     free(ctx->speech_dec.rope_cos); free(ctx->speech_dec.rope_sin);
     /* Close safetensors (all get_bf16/get_f32 pointers point into this data) */
-    multi_safetensors_close(ctx->safetensors);
-    multi_safetensors_close(ctx->speech_safetensors);
+    ingot_st_close(ctx->safetensors);
+    ingot_st_close(ctx->speech_safetensors);
     free(ctx->instruct);
     free(ctx->speaker_embedding);
     free(ctx->ref_audio_path);
     free(ctx->ref_text);
+    free(ctx->emo_ref_path);
+    free(ctx->emo_ref_text);
     /* Free runtime buffers */
     free(ctx->kv_cache_k); free(ctx->kv_cache_v); free(ctx->cp_kv_k); free(ctx->cp_kv_v);
     free(ctx->dec_x); free(ctx->dec_x_norm); free(ctx->dec_q); free(ctx->dec_k); free(ctx->dec_v);
@@ -975,11 +982,15 @@ int qwen_tts_generate(qwen_tts_ctx_t *ctx, const char *text, float **out_samples
     int ref_text_token_len = 0;
     if (tok) {
         text_tokens = qwen_tokenizer_encode_para(tok, text, &text_token_len);
-        /* ICL mode: also tokenize reference text */
-        if (ctx->voice_clone && !ctx->xvector_only && ctx->ref_text) {
-            ref_text_tokens = qwen_tokenizer_encode(tok, ctx->ref_text, &ref_text_token_len);
+        /* ICL mode: also tokenize reference text. --emo-ref brings its own transcript and takes
+         * precedence — its codec anchor is what carries the emotion (and it does NOT require
+         * voice_clone, so it works on CustomVoice with a preset speaker). */
+        const char *icl_text = (ctx->emo_ref_path && ctx->emo_ref_text) ? ctx->emo_ref_text
+                             : ((ctx->voice_clone && !ctx->xvector_only) ? ctx->ref_text : NULL);
+        if (icl_text) {
+            ref_text_tokens = qwen_tokenizer_encode(tok, icl_text, &ref_text_token_len);
             if (!ctx->silent && ref_text_tokens)
-                fprintf(stderr, "Ref text: \"%s\" (%d tokens)\n", ctx->ref_text, ref_text_token_len);
+                fprintf(stderr, "Ref text: \"%s\" (%d tokens)\n", icl_text, ref_text_token_len);
         }
         /* tok is cached in ctx->cached_tokenizer — do not free */
     }
@@ -1067,8 +1078,39 @@ int qwen_tts_generate(qwen_tts_ctx_t *ctx, const char *text, float **out_samples
         fprintf(stderr, "ICL: --graft -> ignoring %d ref frames, cloning via x-vector (emotive)\n",
                 ctx->cached_ref_n_frames);
 
+    /* --emo-ref (EMOTION BY EXAMPLE): encode the emotional reference and use ONLY its codec
+     * tokens as the ICL anchor. Checked FIRST so it wins over any clone-supplied ref_codes.
+     * Crucially this does NOT set/need voice_clone: the speaker slot below stays whatever it
+     * already was (preset -s on CustomVoice, or a loaded clone's x-vector), so identity and
+     * emotion come from two independent places. That is the whole point on the 0.6B, which has
+     * no steerable emotion subspace but shares the codec vocabulary with the 1.7B. */
+    if (ctx->emo_ref_path && ctx->emo_ref_text && ref_text_tokens && ref_text_token_len > 0) {
+        float *emo_samples = NULL;
+        int emo_n_samples = 0, emo_sr = 0;
+        if (qwen_read_wav(ctx->emo_ref_path, &emo_samples, &emo_n_samples, &emo_sr) != 0) {
+            fprintf(stderr, "Error: failed to read emotion reference %s\n", ctx->emo_ref_path);
+        } else {
+            if (emo_sr != QWEN_TTS_SAMPLE_RATE && !ctx->silent)
+                fprintf(stderr, "Warning: emo-ref sample rate %d, expected %d\n",
+                        emo_sr, QWEN_TTS_SAMPLE_RATE);
+            /* Same trailing-fade trim as the clone paths: a fade-out tail poisons the anchor. */
+            qwen_trim_trailing_silence(emo_samples, &emo_n_samples, emo_sr, ctx->silent);
+            if (qwen_speech_encoder_encode(ctx, emo_samples, emo_n_samples,
+                                           &ref_codes, &ref_n_frames) != 0) {
+                fprintf(stderr, "Error: speech encoder failed on emotion reference\n");
+                ref_codes = NULL; ref_n_frames = 0;
+            } else {
+                icl_mode = 1;
+                ref_codes_owned = 1;
+                if (!ctx->silent)
+                    fprintf(stderr, "Emotion-by-example: %d ref frames from %s (identity unchanged)\n",
+                            ref_n_frames, ctx->emo_ref_path);
+            }
+            free(emo_samples);
+        }
+    }
     /* Check for cached ref_codes from .qvoice file (skipped in --graft mode) */
-    if (ctx->voice_clone && !ctx->graft_mode && ctx->cached_ref_codes && ctx->cached_ref_n_frames > 0
+    else if (ctx->voice_clone && !ctx->graft_mode && ctx->cached_ref_codes && ctx->cached_ref_n_frames > 0
         && ctx->ref_text && ref_text_tokens && ref_text_token_len > 0) {
         ref_codes = ctx->cached_ref_codes;
         ref_n_frames = ctx->cached_ref_n_frames;
@@ -1352,6 +1394,27 @@ int qwen_tts_generate(qwen_tts_ctx_t *ctx, const char *text, float **out_samples
      * the sequential path and correctly repopulate dec_x at the last position. */
     if (delta_start >= prefill_len) delta_start = 0;
 
+#if defined(QWEN_HAVE_CUDA) || defined(QWEN_HAVE_METAL)
+    /* Issue #19 (part 2): fused GPU Talker + emotion steering. Steered steps run on the
+     * CPU path and read the HOST KV, but a fused delta-prefill writes the device KV only,
+     * so host rows [delta_start, prefill_len) may be stale from an earlier request. A
+     * steered decode would then attend to the previous request's text. Force a full fresh
+     * prefill (host + device KV both repopulated) whenever this request will steer. */
+    {
+        extern void *g_gpu_fused_owner;
+        int fused_owner = 0;
+#ifdef QWEN_HAVE_CUDA
+        { extern void *g_cuda_talker_state;
+          if (g_cuda_talker_state && ctx == g_gpu_fused_owner) fused_owner = 1; }
+#endif
+#ifdef QWEN_HAVE_METAL
+        { extern void *g_metal_talker_state;
+          if (g_metal_talker_state && ctx == g_gpu_fused_owner) fused_owner = 1; }
+#endif
+        if (fused_owner && ctx->ml_steer && ctx->ml_steer_weight != 0.0f) delta_start = 0;
+    }
+#endif
+
     /* Reset KV cache to the reusable prefix length */
     ctx->kv_len = delta_start;
 
@@ -1395,12 +1458,18 @@ int qwen_tts_generate(qwen_tts_ctx_t *ctx, const char *text, float **out_samples
         }
     }
 #ifdef QWEN_HAVE_CUDA
-    /* Fused GPU Talker: the CPU batched prefill populated the host bf16 KV; upload it to the
-     * device cache once so the fused decode steps (which read the device KV) see the prompt. */
+    /* Fused GPU Talker KV sync (issue #19). The device KV is the source of truth in fused mode:
+     *  - delta_start == 0 (full CPU batched prefill): host kv_cache_k/v is freshly populated
+     *    by qwen_talker_prefill → mirror it to the device once.
+     *  - delta_start > 0 (server delta-reuse): the new tokens were stepped through the fused
+     *    GPU step, which writes the device KV DIRECTLY and skips the host KV. The matching
+     *    prefix [0, delta_start) is still valid on the device from the previous request, so
+     *    the device KV is ALREADY correct — uploading here would clobber it with the stale
+     *    host KV (the previous request's text) and make the model replay the old prompt. */
     {
         extern void *g_cuda_talker_state, *g_gpu_fused_owner;
         extern void qwen_cuda_talker_upload_kv(void *, qwen_tts_ctx_t *, int);
-        if (g_cuda_talker_state && ctx == g_gpu_fused_owner &&
+        if (g_cuda_talker_state && ctx == g_gpu_fused_owner && delta_start == 0 &&
             !(ctx->ml_steer && ctx->ml_steer_w_eff != 0.0f))
             qwen_cuda_talker_upload_kv(g_cuda_talker_state, ctx, ctx->kv_len);
     }
@@ -1409,7 +1478,7 @@ int qwen_tts_generate(qwen_tts_ctx_t *ctx, const char *text, float **out_samples
     {
         extern void *g_metal_talker_state, *g_gpu_fused_owner;
         extern void qwen_metal_talker_upload_kv(void *, qwen_tts_ctx_t *, int);
-        if (g_metal_talker_state && ctx == g_gpu_fused_owner &&
+        if (g_metal_talker_state && ctx == g_gpu_fused_owner && delta_start == 0 &&
             !(ctx->ml_steer && ctx->ml_steer_w_eff != 0.0f))
             qwen_metal_talker_upload_kv(g_metal_talker_state, ctx, ctx->kv_len);
     }
