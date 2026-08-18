@@ -5,6 +5,9 @@ Date: 2026-08-18
 Purpose: give the next reviewer (including Claude) enough context to confirm,
 challenge, or revise the ROCm changes without relying on chat history.
 
+For a standalone set of review instructions, use
+`docs/claude-review-prompt.md`.
+
 ## Validation status: NOT HARDWARE TESTED
 
 Do not approve these changes because syntax/configuration checks pass. No ROCm

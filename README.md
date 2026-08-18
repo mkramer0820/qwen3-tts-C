@@ -71,6 +71,7 @@ operation.
 - [ROCm training and native C inference behavior](docs/amd-rocm.md)
 - [Independent code-review handoff and hardware acceptance checklist](docs/rocm-change-review-2026-08-18.md)
 - [Upstream synchronization review and ROCm compatibility notes](docs/upstream-sync-2026-08-18.md)
+- [Copy-paste Claude review prompt](docs/claude-review-prompt.md)
 - [Voice cloning](docs/voice-cloning.md) and [custom voice formats](docs/custom-voices.md)
 
 ## Inherited Engine Overview
